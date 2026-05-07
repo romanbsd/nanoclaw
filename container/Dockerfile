@@ -131,11 +131,34 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 # (e.g. @anthropic-ai/claude-code-linux-arm64) into bin/claude.exe in the
 # wrapper. After that copy, the variant package directory is a ~238MB dead
 # duplicate. Remove it and the now-dangling symlink in the wrapper.
+#
+# The wrapper's bin/claude.exe (~249MB) is also byte-identical to the SDK's
+# native binary at /app/node_modules/@anthropic-ai/claude-agent-sdk-linux-*/claude
+# whenever the SDK and CLI carry the same upstream claude-code version.
+# Replace it with a symlink to save another ~249MB. Done in the same RUN as
+# the install so the postinstall-copied binary never persists into the layer.
+# A SHA256 mismatch fails the build — that means @anthropic-ai/claude-agent-sdk
+# in container/agent-runner/package.json has drifted from CLAUDE_CODE_VERSION
+# and must be re-aligned.
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && rm -rf /pnpm/store \
     && rm -rf /pnpm/global/5/.pnpm/@anthropic-ai+claude-code-linux-*@* \
-    && rm -f /pnpm/global/5/.pnpm/@anthropic-ai+claude-code@*/node_modules/@anthropic-ai/claude-code-linux-*
+    && rm -f /pnpm/global/5/.pnpm/@anthropic-ai+claude-code@*/node_modules/@anthropic-ai/claude-code-linux-* \
+    && case "$(dpkg --print-architecture)" in \
+         arm64) SDK_ARCH=linux-arm64 ;; \
+         amd64) SDK_ARCH=linux-x64 ;; \
+         *) echo "unknown arch: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+       esac \
+    && SDK_BIN="/app/node_modules/@anthropic-ai/claude-agent-sdk-${SDK_ARCH}/claude" \
+    && CLI_BIN=$(ls /pnpm/global/5/.pnpm/@anthropic-ai+claude-code@*/node_modules/@anthropic-ai/claude-code/bin/claude.exe) \
+    && [ "$(sha256sum "$SDK_BIN" | cut -d' ' -f1)" = "$(sha256sum "$CLI_BIN" | cut -d' ' -f1)" ] \
+       || { echo "ERROR: claude-agent-sdk native binary != claude-code wrapper binary." >&2; \
+            echo "  SDK : $SDK_BIN" >&2; echo "  CLI : $CLI_BIN" >&2; \
+            echo "  Bump @anthropic-ai/claude-agent-sdk in container/agent-runner/package.json" >&2; \
+            echo "  to match CLAUDE_CODE_VERSION=${CLAUDE_CODE_VERSION} (so both ship the same native bin)." >&2; \
+            exit 1; } \
+    && ln -sf "$SDK_BIN" "$CLI_BIN"
 
 # ---- ncl CLI wrapper ----------------------------------------------------------
 # Actual script lives in the mounted source at /app/src/cli/ncl.ts.
