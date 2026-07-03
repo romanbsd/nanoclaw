@@ -24,9 +24,12 @@
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "build:xmpp": "pnpm --filter @agent-xmpp/protocol build && pnpm --filter @agent-xmpp/gateway build && pnpm --filter @agent-xmpp/mcp build",
+    "test:xmpp-e2e": "pnpm run build:xmpp && pnpm --filter @agent-xmpp/integration e2e:api"
   },
   "dependencies": {
+    "@agent-xmpp/protocol": "workspace:*",
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
     "@onecli-sh/sdk": "2.2.1",

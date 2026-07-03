@@ -1,0 +1,26 @@
+services:
+  openfire:
+    image: openfire-monitoring-plugin-openfire:latest@sha256:067cf5f0e2059e3d04f816c0050b77d02732ffd79626e8b4ff084f085fe2e5d2
+    # Openfire entrypoint passes args starting with '-' to bin/openfire.sh (-demoboot copies
+    # conf/openfire-demoboot.xml → conf/openfire.xml; see distribution/src/bin/openfire.sh).
+    command: ["-demoboot"]
+    ports:
+      - "${E2E_XMPP_PORT:-15222}:5222"
+      - "${E2E_COMPONENT_PORT:-15275}:5275"
+      - "${E2E_OPENFIRE_ADMIN_PORT:-19090}:9090"
+    extra_hosts:
+      # In-container only; host-side clients use 127.0.0.1 + example.org domain.
+      - "example.org:host-gateway"
+    volumes:
+      - openfire_data:/var/lib/openfire
+      # Replace stock demoboot (single john user is enough for ping E2E).
+      - ./openfire/openfire-demoboot.xml:/usr/local/openfire/conf_org/openfire-demoboot.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/login.jsp > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 45s
+
+volumes:
+  openfire_data:

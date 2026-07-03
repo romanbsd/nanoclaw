@@ -1,0 +1,27 @@
+{
+  "name": "@agent-xmpp/mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing XMPP gateway tools to agent containers",
+  "type": "module",
+  "bin": {
+    "agent-xmpp-mcp": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "node ../../../node_modules/typescript/bin/tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agent-xmpp/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9"
+  }
+}
