@@ -2,7 +2,7 @@
 
 import { xml, type Element } from '@xmpp/xml';
 
-import type { AgentDescriptor, XmppDiscoverAgentsInput } from '@agent-xmpp/protocol';
+import { A2A_XMPP_BINDING_URI, type A2aAgentCard, type AgentDescriptor, type XmppDiscoverAgentsInput } from '@agent-xmpp/protocol';
 
 const DISCO_NS = 'http://jabber.org/protocol/disco#info';
 
@@ -10,14 +10,15 @@ export function buildDiscoInfo(to: string, from: string): Element {
   return xml('iq', { type: 'get', from, to, id: `disco-${Date.now()}` }, xml('query', { xmlns: DISCO_NS }));
 }
 
-export function buildGatewayDiscoResponse(from: string, to: string, agentDomain: string): Element {
+export function buildGatewayDiscoResponse(from: string, to: string, agentDomain: string, iqId: string): Element {
   return xml(
     'iq',
-    { type: 'result', from, to, id: `disco-${Date.now()}` },
+    { type: 'result', from, to, id: iqId },
     xml(
       'query',
       { xmlns: DISCO_NS },
       xml('identity', { category: 'gateway', type: 'agent', name: 'Agent XMPP Gateway' }),
+      xml('feature', { var: A2A_XMPP_BINDING_URI }),
       xml('feature', { var: 'urn:xmpp:mam:2' }),
       xml('feature', { var: 'http://jabber.org/protocol/muc' }),
       xml('feature', { var: 'urn:xmpp:http:upload:0' }),
@@ -37,6 +38,10 @@ export class AgentRegistry {
 
   unregister(jid: string): void {
     this.agents.delete(jid);
+  }
+
+  getAgentCard(jid: string): A2aAgentCard | undefined {
+    return this.agents.get(jid)?.agentCard;
   }
 
   discover(input: XmppDiscoverAgentsInput): AgentDescriptor[] {

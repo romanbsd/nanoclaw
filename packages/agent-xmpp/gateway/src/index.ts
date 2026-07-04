@@ -6,7 +6,8 @@ import { loadConfig } from './config.js';
 import { createHttpServer } from './http-server.js';
 import { Mailbox } from './mailbox.js';
 import { StanzaRouter } from './stanza-router.js';
-import { AgentRegistry } from './xep-plugins/discovery.js';
+import { handleBindingIq } from './xep-plugins/a2a-binding.js';
+import { AgentRegistry, buildGatewayDiscoResponse } from './xep-plugins/discovery.js';
 import { MamQueryAwaiter } from './xep-plugins/mam-query.js';
 import { createComponentSession } from './xmpp-component.js';
 
@@ -17,7 +18,21 @@ async function main(): Promise<void> {
   const pendingIq = new Map<string, { resolve: (stanza: unknown) => void; reject: (e: Error) => void }>();
   const mamAwaiter = new MamQueryAwaiter();
 
-  const session = createComponentSession(config);
+  const session = createComponentSession(config, (stanza) => {
+    const binding = handleBindingIq(stanza, config, agentRegistry);
+    if (binding) return binding;
+    const query = stanza.getChild('query', 'http://jabber.org/protocol/disco#info');
+    if (query) {
+      const from = stanza.attrs.from as string;
+      const to = stanza.attrs.to as string;
+      const iqId = stanza.attrs.id as string;
+      const toBare = to.split('/')[0];
+      if (toBare === config.componentJid.split('/')[0]) {
+        return buildGatewayDiscoResponse(toBare, from, config.agentDomain, iqId);
+      }
+    }
+    return null;
+  });
   const router = new StanzaRouter(config, mailbox, (stanza) => session.send(stanza));
 
   session.onStanza((stanza) => {

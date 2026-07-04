@@ -11,7 +11,9 @@ export interface XmppComponentSession {
   onStanza: (handler: (stanza: Element) => void) => void;
 }
 
-export function createComponentSession(config: GatewayConfig): XmppComponentSession {
+export type IqGetHandler = (stanza: Element) => Element | null;
+
+export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHandler): XmppComponentSession {
   const xmpp = component({
     service: config.componentService,
     domain: config.componentJid,
@@ -21,12 +23,11 @@ export function createComponentSession(config: GatewayConfig): XmppComponentSess
   const stanzaHandlers: Array<(stanza: Element) => void> = [];
 
   xmpp.on('stanza', (stanza: Element) => {
-    if (stanza.name === 'iq' && stanza.attrs.type === 'get') {
-      const query = stanza.getChild('query', 'http://jabber.org/protocol/disco#info');
-      if (query) {
-        const from = stanza.attrs.from as string;
-        const to = stanza.attrs.to as string;
-        xmpp.send(buildGatewayDiscoResponse(to, from, config.agentDomain)).catch(() => undefined);
+    if (stanza.name === 'iq' && stanza.attrs.type === 'get' && onIqGet) {
+      const response = onIqGet(stanza);
+      if (response) {
+        xmpp.send(response).catch(() => undefined);
+        return;
       }
     }
     for (const h of stanzaHandlers) h(stanza);

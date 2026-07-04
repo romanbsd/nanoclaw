@@ -404,7 +404,7 @@ async function deliverMessage(
     msg.content,
     files,
     deliverInstance,
-    msg.channel_type === 'xmpp' ? getAgentGroup(session.agent_group_id)?.xmpp_jid ?? undefined : undefined,
+    msg.channel_type === 'xmpp' ? (getAgentGroup(session.agent_group_id)?.xmpp_jid ?? undefined) : undefined,
   );
   log.info('Message delivered', {
     id: msg.id,

@@ -1,21 +1,22 @@
 import Fastify from 'fastify';
 
-import type {
-  OutboundDeliverRequest,
-  OutboundDeliverResponse,
-  PublishAgentDescriptorRequest,
-  XmppAckInput,
-  XmppDiscoverAgentsInput,
-  XmppGetArchiveInput,
-  XmppJoinRoomInput,
-  XmppLeaveRoomInput,
-  XmppPublishEventInput,
-  XmppReplyInput,
-  XmppSendMessageInput,
-  XmppSendRoomMessageInput,
-  XmppSetPresenceInput,
-  XmppShareFileInput,
-  XmppUploadFileInput,
+import {
+  registrationFromDescriptor,
+  type OutboundDeliverRequest,
+  type OutboundDeliverResponse,
+  type PublishAgentDescriptorRequest,
+  type XmppAckInput,
+  type XmppDiscoverAgentsInput,
+  type XmppGetArchiveInput,
+  type XmppJoinRoomInput,
+  type XmppLeaveRoomInput,
+  type XmppPublishEventInput,
+  type XmppReplyInput,
+  type XmppSendMessageInput,
+  type XmppSendRoomMessageInput,
+  type XmppSetPresenceInput,
+  type XmppShareFileInput,
+  type XmppUploadFileInput,
 } from '@agent-xmpp/protocol';
 
 import type { GatewayConfig } from './config.js';
@@ -31,6 +32,7 @@ import { defaultPubsubService, buildPublish } from './xep-plugins/pubsub.js';
 import { buildAckStanza } from './xep-plugins/receipts.js';
 import type { SendStanzaFn } from './stanza-router.js';
 import { deliverLocalAgentMessage } from './agent-local-delivery.js';
+import { buildPublishAgentCard } from './xep-plugins/a2a-binding.js';
 import { xml } from './xmpp-component.js';
 
 export interface HttpServerDeps {
@@ -195,6 +197,15 @@ export async function createHttpServer(deps: HttpServerDeps) {
     return reply.send({ agents: agentRegistry.discover(req.body) });
   });
 
+  app.get<{ Params: { jid: string } }>('/v1/agents/:jid/agentcard', async (req, reply) => {
+    const jid = decodeURIComponent(req.params.jid);
+    const card = agentRegistry.getAgentCard(jid);
+    if (!card) {
+      return reply.status(404).send({ error: `No Agent Card for ${jid}` });
+    }
+    return reply.send(card);
+  });
+
   app.post<{ Body: PublishAgentDescriptorRequest }>('/v1/agents/publish_descriptor', async (req, reply) => {
     // Called by agent-runner on wake; feeds xmpp.discover_agents and capability-based routing.
     const descriptor = req.body;
@@ -210,24 +221,11 @@ export async function createHttpServer(deps: HttpServerDeps) {
       }
     }
 
-    const toolNames = descriptor.tools.map((t) => t.name);
-    const presenceStatus =
-      descriptor.availability === 'busy'
-        ? 'busy'
-        : descriptor.availability === 'offline'
-          ? 'offline'
-          : 'available';
+    const { agent, agentCard } = registrationFromDescriptor(descriptor);
+    agentRegistry.register(agent);
 
-    agentRegistry.register({
-      jid: descriptor.jid,
-      name: descriptor.jid.split('@')[0],
-      capabilities: [...toolNames, ...descriptor.supportedProtocols],
-      status: presenceStatus,
-      metadata: { runtimeDescriptor: descriptor },
-    });
-
-    const show = descriptor.availability === 'busy' ? 'dnd' : undefined;
-    const type = descriptor.availability === 'offline' ? 'unavailable' : undefined;
+    const show = agent.status === 'busy' ? 'dnd' : undefined;
+    const type = agent.status === 'offline' ? 'unavailable' : undefined;
     const children = [xml('status', {}, `health:${descriptor.health}`)];
     if (show) children.unshift(xml('show', {}, show));
     await send(xml('presence', { from: descriptor.jid, type }, ...children));
@@ -244,7 +242,9 @@ export async function createHttpServer(deps: HttpServerDeps) {
       }),
     );
 
-    return reply.send({ ok: true, jid: descriptor.jid });
+    await send(buildPublishAgentCard(descriptor.jid, service, agentCard));
+
+    return reply.send({ ok: true, jid: descriptor.jid, agentCard });
   });
 
   app.post<{ Body: { jid: string } }>('/v1/agents/unregister', async (req, reply) => {

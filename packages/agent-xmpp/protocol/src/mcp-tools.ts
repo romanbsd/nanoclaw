@@ -1,5 +1,6 @@
 /** MCP tool input/output types from Agent XMPP Adapter API Surface §7 */
 
+import type { A2aAgentCard } from './a2a-binding.js';
 import type { AgentMessage, FileRef, MessagePolicy, TraceContext } from './agent-message.js';
 
 export const outboundMessageKinds = ['text', 'task', 'result', 'error', 'file', 'command'] as const;
@@ -92,6 +93,8 @@ export interface AgentDescriptor {
   capabilities: string[];
   status?: 'available' | 'busy' | 'offline' | 'dormant';
   metadata?: Record<string, unknown>;
+  /** A2A Agent Card when the agent advertises urn:xmpp:a2a:binding:1.0 */
+  agentCard?: A2aAgentCard;
 }
 
 export interface XmppGetArchiveInput {
