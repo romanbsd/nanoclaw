@@ -186,11 +186,16 @@ export async function startE2eStack(): Promise<E2eStack> {
   await compose(['up', '-d', 'openfire']);
   await waitForUrl(`${config.openfireUrl}/login.jsp`);
   await waitForTcp(Number(config.xmppPort));
-  await new Promise((r) => setTimeout(r, 5000));
+  await new Promise((r) => setTimeout(r, 15000));
 
   console.log('[e2e] bootstrapping Openfire (component secret)...');
   await run('node', [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
-    env: { ...process.env, OPENFIRE_URL: config.openfireUrl, XMPP_DOMAIN: config.xmppDomain },
+    env: {
+      ...process.env,
+      OPENFIRE_URL: config.openfireUrl,
+      XMPP_DOMAIN: config.xmppDomain,
+      E2E_HTTP_BIND_PORT: process.env.E2E_HTTP_BIND_PORT || '17070',
+    },
   });
 
   console.log('[e2e] starting gateway...');

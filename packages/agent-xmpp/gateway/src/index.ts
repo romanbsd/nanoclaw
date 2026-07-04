@@ -7,7 +7,6 @@ import { createHttpServer } from './http-server.js';
 import { Mailbox } from './mailbox.js';
 import { StanzaRouter } from './stanza-router.js';
 import { AgentRegistry } from './xep-plugins/discovery.js';
-import { parseSlotResponse } from './xep-plugins/file-upload.js';
 import { MamQueryAwaiter } from './xep-plugins/mam-query.js';
 import { createComponentSession } from './xmpp-component.js';
 
@@ -24,20 +23,18 @@ async function main(): Promise<void> {
   session.onStanza((stanza) => {
     if (mamAwaiter.handleStanza(stanza, config.agentDomain)) return;
 
-    if (stanza.name === 'iq' && stanza.attrs.type === 'result') {
+    if (stanza.name === 'iq' && (stanza.attrs.type === 'result' || stanza.attrs.type === 'error')) {
       const id = stanza.attrs.id as string;
       const pending = pendingIq.get(id);
       if (pending) {
         pendingIq.delete(id);
-        pending.resolve(stanza);
-        return;
-      }
-      if (parseSlotResponse(stanza)) {
-        const p = pendingIq.get(id);
-        if (p) {
-          pendingIq.delete(id);
-          p.resolve(stanza);
+        if (stanza.attrs.type === 'error') {
+          const errEl = stanza.getChild('error');
+          pending.reject(new Error(errEl ? String(errEl) : 'iq error'));
+        } else {
+          pending.resolve(stanza);
         }
+        return;
       }
       return;
     }

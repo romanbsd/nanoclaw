@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const OPENFIRE_URL = process.env.OPENFIRE_URL || 'http://127.0.0.1:9090';
+const HTTP_BIND_HOST_PORT = process.env.E2E_HTTP_BIND_PORT || '17070';
 const ADMIN_USER = process.env.OPENFIRE_ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.OPENFIRE_ADMIN_PASS || 'admin';
 const COMPONENT_SECRET = process.env.XMPP_COMPONENT_SECRET || 'component-secret';
@@ -131,6 +132,74 @@ async function ensurePinger(cookieJar: string): Promise<void> {
   console.log(`[bootstrap] created ${PINGER_USER} user`);
 }
 
+async function waitForPluginPage(cookieJar: string, page: string, timeoutMs = 180_000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const html = await curlAdmin(cookieJar, [`${OPENFIRE_URL}/${page}`]);
+      if (html.includes('name="csrf"') && !html.includes('Plugin not found')) {
+        return html;
+      }
+    } catch {
+      /* retry */
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  throw new Error(`plugin page not ready: ${page}`);
+}
+
+async function ensureHttpBind(cookieJar: string): Promise<void> {
+  const page = await curlAdmin(cookieJar, [`${OPENFIRE_URL}/http-bind.jsp`]);
+  if (page.includes('name="httpBindEnabled" value="true"') && page.includes('checked')) {
+    console.log('[bootstrap] HTTP binding already enabled');
+    return;
+  }
+  const csrf = extractCsrf(page);
+  const portMatch = page.match(/name="port"[^>]*value="(\d+)"/);
+  const secureMatch = page.match(/name="securePort"[^>]*value="(\d+)"/);
+  await curlAdmin(cookieJar, [
+    '-X',
+    'POST',
+    `${OPENFIRE_URL}/http-bind.jsp`,
+    '-H',
+    'Content-Type: application/x-www-form-urlencoded',
+    '--data',
+    new URLSearchParams({
+      csrf,
+      httpBindEnabled: 'true',
+      port: portMatch?.[1] || '7070',
+      securePort: secureMatch?.[1] || '7443',
+      update: 'Save Settings',
+    }).toString(),
+  ]);
+  console.log('[bootstrap] enabled HTTP binding');
+}
+
+async function ensureHttpFileUpload(cookieJar: string): Promise<void> {
+  const page = await waitForPluginPage(cookieJar, 'plugins/httpfileupload/httpfileupload-settings.jsp');
+  const csrf = extractCsrf(page);
+  const maxFileSizeMatch = page.match(/name="maxFileSize"[^>]*value="(\d+)"/);
+  await curlAdmin(cookieJar, [
+    '-X',
+    'POST',
+    `${OPENFIRE_URL}/plugins/httpfileupload/httpfileupload-settings.jsp`,
+    '-H',
+    'Content-Type: application/x-www-form-urlencoded',
+    '--data',
+    new URLSearchParams({
+      csrf,
+      announcedProtocol: 'http',
+      announcedWebHost: '127.0.0.1',
+      announcedPort: HTTP_BIND_HOST_PORT,
+      announcedContextRoot: '/httpfileupload',
+      maxFileSize: maxFileSizeMatch?.[1] || String(10 * 1024 * 1024),
+      fileRepo: '',
+      update: 'Save Settings',
+    }).toString(),
+  ]);
+  console.log(`[bootstrap] configured HTTP File Upload (http://127.0.0.1:${HTTP_BIND_HOST_PORT}/httpfileupload)`);
+}
+
 async function main(): Promise<void> {
   const cookieJar = path.join(os.tmpdir(), `openfire-e2e-${Date.now()}.cookies`);
   await fs.writeFile(cookieJar, '');
@@ -140,6 +209,8 @@ async function main(): Promise<void> {
   console.log('[bootstrap] admin login ok');
   await ensureComponentSecret(cookieJar);
   await ensurePinger(cookieJar);
+  await ensureHttpBind(cookieJar);
+  await ensureHttpFileUpload(cookieJar);
   console.log('[bootstrap] done');
   await fs.unlink(cookieJar).catch(() => undefined);
 }

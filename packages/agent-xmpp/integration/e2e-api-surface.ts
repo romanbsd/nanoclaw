@@ -184,17 +184,16 @@ const tests: TestCase[] = [
   },
   {
     name: 'POST /v1/tools/xmpp.upload_file',
-    optional: true,
     fn: async (ctx) => {
       const bytes = Buffer.from('e2e upload payload', 'utf8');
       const { status, json } = await ctx.api.uploadFile({
         bytesBase64: bytes.toString('base64'),
         name: 'e2e.txt',
         mediaType: 'text/plain',
-        uploadService: `upload.${ctx.config.xmppDomain}`,
+        uploadService: `httpfileupload.${ctx.config.xmppDomain}`,
       });
       if (status !== 200 || !json.file?.url) {
-        throw new Error(`upload_file unavailable (${status}): ${JSON.stringify(json)}`);
+        throw new Error(`upload_file failed (${status}): ${JSON.stringify(json)}`);
       }
       ctx.uploadedFile = json.file;
     },

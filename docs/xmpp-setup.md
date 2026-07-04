@@ -64,10 +64,18 @@ Full HTTP API coverage (`e2e-api-surface.ts`):
 pnpm --filter @agent-xmpp/integration e2e:api
 ```
 
-Covers `GET /health`, `POST /v1/outbound/deliver`, and all `POST /v1/tools/xmpp.*` endpoints (send_message, reply, ack, set_presence, discover_agents, join/send/leave room, publish_event, get_archive, share_file, plus ping/pong via the mock bridge). `upload_file` is optional — skipped when Openfire has no HTTP File Upload plugin (stock demoboot).
+Covers `GET /health`, `POST /v1/outbound/deliver`, and all `POST /v1/tools/xmpp.*` endpoints (send_message, reply, ack, set_presence, discover_agents, join/send/leave room, publish_event, get_archive, share_file, plus ping/pong via the mock bridge). `upload_file` requires HTTP binding enabled on Openfire (see bootstrap).
 
-This uses `packages/agent-xmpp/integration/docker-compose.yml` with the pinned local image
-`openfire-monitoring-plugin-openfire:latest@sha256:067cf5f0…` and Openfire **demoboot**
+Build or refresh the Openfire image (monitoring + HTTP File Upload + REST API plugins):
+
+```bash
+./packages/agent-xmpp/integration/openfire/build.sh
+# or: docker compose -f packages/agent-xmpp/integration/docker-compose.yml build openfire
+```
+
+Image tag: `clawdike-openfire:5.1.0-e2e`. Plugins: monitoring 2.7.0, httpfileupload 1.5.0, restAPI 1.12.0. Java [REST API Client](https://github.com/igniterealtime/REST-API-Client) 1.1.5 is bundled at `/opt/rest-api-client/` inside the image.
+
+This uses `packages/agent-xmpp/integration/docker-compose.yml` with Openfire **demoboot**
 (`command: ["-demoboot"]`, see `../openfire/documentation/demoboot-guide.html` and
 `distribution/src/bin/openfire.sh`).
 

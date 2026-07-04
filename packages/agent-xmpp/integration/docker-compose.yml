@@ -1,6 +1,14 @@
 services:
   openfire:
-    image: openfire-monitoring-plugin-openfire:latest@sha256:067cf5f0e2059e3d04f816c0050b77d02732ffd79626e8b4ff084f085fe2e5d2
+    build:
+      context: ./openfire
+      dockerfile: Dockerfile
+      args:
+        OPENFIRE_VERSION: "5.1.0"
+        MONITORING_PLUGIN_VERSION: "2.7.0"
+        HTTPFILEUPLOAD_PLUGIN_VERSION: "1.5.0"
+        RESTAPI_PLUGIN_VERSION: "1.12.0"
+    image: clawdike-openfire:5.1.0-e2e
     # Openfire entrypoint passes args starting with '-' to bin/openfire.sh (-demoboot copies
     # conf/openfire-demoboot.xml → conf/openfire.xml; see distribution/src/bin/openfire.sh).
     command: ["-demoboot"]
@@ -8,6 +16,7 @@ services:
       - "${E2E_XMPP_PORT:-15222}:5222"
       - "${E2E_COMPONENT_PORT:-15275}:5275"
       - "${E2E_OPENFIRE_ADMIN_PORT:-19090}:9090"
+      - "${E2E_HTTP_BIND_PORT:-17070}:7070"
     extra_hosts:
       # In-container only; host-side clients use 127.0.0.1 + example.org domain.
       - "example.org:host-gateway"

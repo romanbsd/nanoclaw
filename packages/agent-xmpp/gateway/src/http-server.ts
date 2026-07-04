@@ -124,8 +124,9 @@ export async function createHttpServer(deps: HttpServerDeps) {
   app.post<{ Body: XmppUploadFileInput & { from?: string; uploadService?: string } }>(
     '/v1/tools/xmpp.upload_file',
     async (req, reply) => {
-      const fromJid = req.body.from || config.defaultAgentJid;
-      const uploadService = req.body.uploadService || `upload.${config.agentDomain}`;
+      // Slot IQ results must return to the component JID, not a virtual user JID.
+      const fromJid = req.body.from || config.componentJid;
+      const uploadService = req.body.uploadService || `httpfileupload.${config.agentDomain}`;
       const { bytes, name, mediaType } = decodeUploadInput(req.body);
       const hash = sha256Hex(bytes);
       const iq = buildSlotRequest(fromJid, uploadService, bytes.length, mediaType, name);
