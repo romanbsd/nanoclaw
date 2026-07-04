@@ -4,16 +4,26 @@ export {
   createAgentGroup,
   getAgentGroup,
   getAgentGroupByFolder,
+  getAgentGroupByXmppJid,
   getAllAgentGroups,
   updateAgentGroup,
   deleteAgentGroup,
 } from './agent-groups.js';
+export {
+  createOrchestratorAgent,
+  getOrchestratorAgent,
+  getOrchestratorAgentByGroupId,
+  getOrchestratorAgentByXmppJid,
+  listOrchestratorAgents,
+  deleteOrchestratorAgent,
+} from './orchestrator-agents.js';
 export {
   createMessagingGroup,
   getMessagingGroup,
   getMessagingGroupByPlatform,
   getAllMessagingGroups,
   getMessagingGroupsByChannel,
+  getMessagingGroupsByAgentGroup,
   updateMessagingGroup,
   deleteMessagingGroup,
   createMessagingGroupAgent,

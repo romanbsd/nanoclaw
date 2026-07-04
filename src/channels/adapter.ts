@@ -30,6 +30,8 @@ export interface DeliveryAddress {
   channelType: string;
   platformId: string;
   threadId: string | null;
+  /** XMPP recipient agent JID for multi-agent routing. */
+  instance?: string;
 }
 
 /**
@@ -194,7 +196,12 @@ export interface ChannelAdapter {
   isConnected(): boolean;
 
   // Outbound delivery — returns the platform message ID if available
-  deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
+  deliver(
+    platformId: string,
+    threadId: string | null,
+    message: OutboundMessage,
+    options?: { fromJid?: string },
+  ): Promise<string | undefined>;
 
   // Optional
   setTyping?(platformId: string, threadId: string | null): Promise<void>;

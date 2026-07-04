@@ -25,6 +25,7 @@ export class StanzaRouter {
     if (stanza.name !== 'message') return;
 
     const toBare = (stanza.attrs.to as string)?.split('/')[0] || '';
+    // Stanzas arrive on the component JID; resolve which registered agent they target.
     const agentJid = resolveTargetAgentJid(toBare, this.config.agentDomain, this.config.defaultAgentJid);
 
     if (!isAgentJid(agentJid, this.config.agentDomain) && agentJid !== this.config.defaultAgentJid) {
@@ -49,6 +50,7 @@ export class StanzaRouter {
     );
 
     if (isDuplicate && !redelivered) return;
+    // Duplicate without redelivery flag: already bridged; skip unless host asked for retry.
     if (isDuplicate && redelivered) this.mailbox.markRedelivered(stanzaId);
 
     const ctx: InboundDeliveryContext = {

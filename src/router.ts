@@ -20,12 +20,13 @@
 import { getChannelAdapter, getChannelDefaults } from './channels/channel-registry.js';
 import { resolveThreadPolicy, resolveUnknownSenderPolicy } from './channels/channel-defaults.js';
 import { gateCommand } from './command-gate.js';
-import { getAgentGroup } from './db/agent-groups.js';
+import { getAgentGroup, getAgentGroupByXmppJid } from './db/agent-groups.js';
 import { recordDroppedMessage } from './db/dropped-messages.js';
 import {
   createMessagingGroup,
   getMessagingGroupAgents,
   getMessagingGroupWithAgentCount,
+  getMessagingGroupByPlatform,
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
@@ -157,6 +158,62 @@ function safeParseContent(raw: string): { text?: string; sender?: string; sender
 }
 
 /**
+ * Route inbound XMPP to a provisioned agent by recipient JID (`event.instance`).
+ * Returns true when the message was handled (including silent drops).
+ */
+async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
+  const recipientJid = event.instance!;
+  const agentGroup = getAgentGroupByXmppJid(recipientJid);
+  if (!agentGroup) {
+    log.warn('XMPP inbound for unknown agent JID', { recipientJid, from: event.platformId });
+    return true;
+  }
+
+  const inbox = getMessagingGroupByPlatform('xmpp', recipientJid, 'xmpp');
+  if (!inbox) {
+    log.warn('XMPP inbox messaging group missing for agent', { recipientJid, agentGroupId: agentGroup.id });
+    return true;
+  }
+
+  const agents = getMessagingGroupAgents(inbox.id);
+  const mga = agents.find((a) => a.agent_group_id === agentGroup.id);
+  if (!mga) {
+    log.warn('XMPP agent not wired to inbox', { recipientJid, agentGroupId: agentGroup.id });
+    return true;
+  }
+
+  const adapter = getChannelAdapter('xmpp');
+  const userId: string | null = senderResolver ? senderResolver(event) : null;
+
+  if (accessGate) {
+    const access = accessGate(event, userId, inbox, agentGroup.id);
+    if (!access.allowed) {
+      recordDroppedMessage({
+        channel_type: event.channelType,
+        platform_id: event.platformId,
+        user_id: userId,
+        sender_name: safeParseContent(event.message.content).sender ?? null,
+        reason: access.reason,
+        messaging_group_id: inbox.id,
+        agent_group_id: agentGroup.id,
+      });
+      return true;
+    }
+  }
+
+  await deliverToAgent(
+    mga,
+    agentGroup,
+    inbox,
+    { ...event, message: { ...event.message, isMention: true } },
+    userId,
+    adapter?.supportsThreads === true,
+    true,
+  );
+  return true;
+}
+
+/**
  * Route an inbound message from a channel adapter to the correct session.
  * Creates messaging group + session if they don't exist yet.
  */
@@ -167,6 +224,12 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   // sequential await is intentional — first-to-claim is order-dependent.
   for (const intercept of messageInterceptors) {
     if (await intercept(event)) return;
+  }
+
+  // XMPP multi-agent: route by recipient JID in `instance`.
+  if (event.channelType === 'xmpp' && event.instance?.includes('@')) {
+    const routed = await routeXmppInbound(event);
+    if (routed) return;
   }
 
   // 0. Apply the adapter's thread policy. Non-threaded adapters (Telegram,

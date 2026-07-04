@@ -32,6 +32,10 @@ export function registerTools(tools: McpToolDefinition[]): void {
   }
 }
 
+export function listRegisteredTools(): import('@modelcontextprotocol/sdk/types.js').Tool[] {
+  return allTools.map((t) => t.tool);
+}
+
 export async function startMcpServer(): Promise<void> {
   const server = new Server({ name: 'nanoclaw', version: '2.0.0' }, { capabilities: { tools: {} } });
 

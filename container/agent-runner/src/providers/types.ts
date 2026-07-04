@@ -139,4 +139,8 @@ export type ProviderEvent =
    * event (tool call, thinking, partial message, anything) so the
    * poll-loop's idle timer stays honest during long tool runs.
    */
-  | { type: 'activity' };
+  | { type: 'activity' }
+  /**
+   * Mock/scenario provider: invoke an XMPP gateway tool by name.
+   */
+  | { type: 'tool_call'; tool: string; args: Record<string, unknown> };

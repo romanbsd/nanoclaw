@@ -6,13 +6,17 @@
   "scripts": {
     "e2e:ping": "node ../../../node_modules/tsx/dist/cli.mjs e2e-ping.ts",
     "e2e:api": "node ../../../node_modules/tsx/dist/cli.mjs e2e-api-surface.ts",
+    "e2e:provision": "node ../../../node_modules/tsx/dist/cli.mjs e2e-provision-identity.ts",
+    "e2e:descriptor": "node ../../../node_modules/tsx/dist/cli.mjs e2e-runtime-descriptor.ts",
+    "e2e:orchestrator": "node ../../../node_modules/tsx/dist/cli.mjs e2e-orchestrator-agents.ts",
     "auth-probe": "node ../../../node_modules/tsx/dist/cli.mjs auth-probe.ts",
     "bootstrap": "node ../../../node_modules/tsx/dist/cli.mjs bootstrap-openfire.ts"
   },
   "dependencies": {
     "@agent-xmpp/protocol": "workspace:*",
     "@xmpp/client": "0.14.0",
-    "@xmpp/xml": "0.14.0"
+    "@xmpp/xml": "0.14.0",
+    "orchestrator": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

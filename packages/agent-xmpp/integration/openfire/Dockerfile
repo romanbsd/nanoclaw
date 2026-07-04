@@ -37,7 +37,10 @@ ENV OPENFIRE_USER=openfire \
     OPENFIRE_DIR=/usr/local/openfire \
     OPENFIRE_DATA_DIR=/var/lib/openfire \
     OPENFIRE_LOG_DIR=/var/log/openfire \
-    OPENFIRE_VERSION="${OPENFIRE_VERSION}"
+    OPENFIRE_VERSION="${OPENFIRE_VERSION}" \
+    OPENFIRE_E2E_REST_SECRET=e2e-rest-secret \
+    OPENFIRE_E2E_ADMIN_USER=admin \
+    OPENFIRE_E2E_ADMIN_PASS=admin
 
 # start-stop-daemon (dpkg) + sudo drop privileges in the entrypoint; curl fetches
 # the release + backs the compose healthcheck. Unpack the prebuilt distribution
@@ -60,9 +63,9 @@ RUN apt-get update \
 COPY --chmod=0755 entrypoint.sh /sbin/entrypoint.sh
 COPY --from=plugins /opt/plugins /opt/plugins
 
-LABEL org.opencontainers.image.title="Openfire E2E (monitoring + httpfileupload + restAPI)" \
+LABEL org.opencontainers.image.title="Openfire E2E (monitoring + httpfileupload + restAPI + provisioning)" \
       org.opencontainers.image.version="${OPENFIRE_VERSION}" \
-      org.opencontainers.image.description="Openfire ${OPENFIRE_VERSION} on Java 25 with monitoring ${MONITORING_PLUGIN_VERSION}, httpfileupload ${HTTPFILEUPLOAD_PLUGIN_VERSION}, restAPI ${RESTAPI_PLUGIN_VERSION}"
+      org.opencontainers.image.description="Openfire ${OPENFIRE_VERSION} on Java 25 with monitoring ${MONITORING_PLUGIN_VERSION}, httpfileupload ${HTTPFILEUPLOAD_PLUGIN_VERSION}, restAPI ${RESTAPI_PLUGIN_VERSION}. REST API provisioning E2E supported."
 
 WORKDIR ${OPENFIRE_DIR}
 HEALTHCHECK --interval=30s --timeout=10s --start-period=3m --retries=5 \

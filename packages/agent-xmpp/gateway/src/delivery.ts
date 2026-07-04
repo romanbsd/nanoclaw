@@ -47,6 +47,7 @@ export function buildBridgePayload(
     redelivered,
   );
 
+  // Host router keys sessions by platformId: MUC room JID for groupchat, bare sender JID for DM.
   const platformId = isGroup && room ? room : agentMsg.from.split('/')[0];
   const threadId = agentMsg.threadId || (isGroup ? room || null : null);
 

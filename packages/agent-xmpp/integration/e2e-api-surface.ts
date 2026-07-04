@@ -219,6 +219,28 @@ const tests: TestCase[] = [
     },
   },
   {
+    name: 'POST /v1/agents/publish_descriptor',
+    fn: async ({ api, config }) => {
+      const { status } = await api.publishDescriptor({
+        jid: config.agentJid,
+        tools: [{ name: 'send_message', description: 'Send message', inputSchema: { type: 'object' } }],
+        model: 'e2e-test',
+        provider: 'claude',
+        softwareVersion: '2.0.0',
+        health: 'healthy',
+        availability: 'idle',
+        supportedProtocols: ['xmpp', 'mcp'],
+        publishedAt: new Date().toISOString(),
+      });
+      if (status !== 200) throw new Error(`publish_descriptor failed: ${status}`);
+      const { status: dStatus, json } = await api.discoverAgents({ capabilities: ['send_message'] });
+      if (dStatus !== 200) throw new Error(`discover_agents failed: ${dStatus}`);
+      if (!json.agents.some((a) => a.jid === config.agentJid)) {
+        throw new Error('published agent not discoverable');
+      }
+    },
+  },
+  {
     name: 'ping/pong flow (component path)',
     fn: async () => {
       await runPingTest();

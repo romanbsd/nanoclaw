@@ -5,6 +5,11 @@ node_modules/
 .pnpm-store/
 # Build output
 dist/
+# Accidental tsc emit next to host sources (e.g. orchestrator cross-compile)
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+src/**/*.d.ts.map
 
 # Local data & auth
 store/

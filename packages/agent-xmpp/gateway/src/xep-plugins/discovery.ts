@@ -51,7 +51,15 @@ export class AgentRegistry {
       );
     }
     if (input.capabilities?.length) {
-      list = list.filter((a) => input.capabilities!.every((c) => a.capabilities.includes(c)));
+      list = list.filter((a) => {
+        const toolNames =
+          (a.metadata?.runtimeDescriptor as { tools?: Array<{ name: string }> } | undefined)?.tools?.map(
+            (t) => t.name,
+          ) ?? [];
+        // Capability filter matches both declared caps and MCP tool names from the runtime descriptor.
+        const caps = [...a.capabilities, ...toolNames];
+        return input.capabilities!.every((c) => caps.includes(c));
+      });
     }
     if (!input.includeUnavailable) {
       list = list.filter((a) => a.status !== 'offline' && a.status !== 'dormant');

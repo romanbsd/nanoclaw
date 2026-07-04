@@ -9,9 +9,16 @@ services:
         HTTPFILEUPLOAD_PLUGIN_VERSION: "1.5.0"
         RESTAPI_PLUGIN_VERSION: "1.12.0"
     image: clawdike-openfire:5.1.0-e2e
+    # Host-side bootstrap + orchestrator E2E read OPENFIRE_REST_SECRET (default e2e-rest-secret).
     # Openfire entrypoint passes args starting with '-' to bin/openfire.sh (-demoboot copies
     # conf/openfire-demoboot.xml → conf/openfire.xml; see distribution/src/bin/openfire.sh).
     command: ["-demoboot"]
+    environment:
+      OPENFIRE_OPTS: >-
+        -DadminConsole.access.allow-wildcards-in-excludes=true
+        -Dplugin.restapi.enabled=true
+        -Dplugin.restapi.secret=e2e-rest-secret
+        -Dplugin.restapi.httpAuth=secret
     ports:
       - "${E2E_XMPP_PORT:-15222}:5222"
       - "${E2E_COMPONENT_PORT:-15275}:5275"

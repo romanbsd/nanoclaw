@@ -1,5 +1,10 @@
 /**
  * Post-start Openfire bootstrap for E2E via admin console (curl + cookie jar).
+ *
+ * REST API plugin requires adminConsole.access.allow-wildcards-in-excludes=true
+ * (OpenFire 4.7.5+ / CVE-2023-32315) or every /plugins/restapi/* request 302s to login.
+ * docker-compose also seeds JVM -D overrides; this script enables REST via rest-api.jsp
+ * (no CSRF on that form) and reloads the plugin when the probe still fails.
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -8,8 +13,9 @@ import path from 'node:path';
 
 const OPENFIRE_URL = process.env.OPENFIRE_URL || 'http://127.0.0.1:9090';
 const HTTP_BIND_HOST_PORT = process.env.E2E_HTTP_BIND_PORT || '17070';
-const ADMIN_USER = process.env.OPENFIRE_ADMIN_USER || 'admin';
-const ADMIN_PASS = process.env.OPENFIRE_ADMIN_PASS || 'admin';
+const ADMIN_USER = process.env.OPENFIRE_ADMIN_USER || process.env.OPENFIRE_E2E_ADMIN_USER || 'admin';
+const ADMIN_PASS = process.env.OPENFIRE_ADMIN_PASS || process.env.OPENFIRE_E2E_ADMIN_PASS || 'admin';
+const REST_SECRET = process.env.OPENFIRE_REST_SECRET || process.env.OPENFIRE_E2E_REST_SECRET || 'e2e-rest-secret';
 const COMPONENT_SECRET = process.env.XMPP_COMPONENT_SECRET || 'component-secret';
 const XMPP_DOMAIN = process.env.XMPP_DOMAIN || 'example.org';
 const PINGER_USER = process.env.XMPP_PINGER_USER || 'john';
@@ -137,7 +143,11 @@ async function waitForPluginPage(cookieJar: string, page: string, timeoutMs = 18
   while (Date.now() < deadline) {
     try {
       const html = await curlAdmin(cookieJar, [`${OPENFIRE_URL}/${page}`]);
-      if (html.includes('name="csrf"') && !html.includes('Plugin not found')) {
+      if (
+        html.includes('name="csrf"') &&
+        !html.includes('Plugin not found') &&
+        !html.includes('Site unavailable')
+      ) {
         return html;
       }
     } catch {
@@ -200,6 +210,149 @@ async function ensureHttpFileUpload(cookieJar: string): Promise<void> {
   console.log(`[bootstrap] configured HTTP File Upload (http://127.0.0.1:${HTTP_BIND_HOST_PORT}/httpfileupload)`);
 }
 
+async function setServerPropertyViaAdmin(
+  cookieJar: string,
+  propName: string,
+  propValue: string,
+): Promise<void> {
+  const page = await curlAdmin(cookieJar, [`${OPENFIRE_URL}/server-properties.jsp`]);
+  // Properties are saved via actionForm (action=save), not the visible propName/propValue fields.
+  const csrf =
+    page.match(/id="actionForm"[\s\S]*?name="csrf"\s+value="([^"]+)"/)?.[1] ?? extractCsrf(page);
+  await curlAdmin(cookieJar, [
+    '-X',
+    'POST',
+    `${OPENFIRE_URL}/server-properties.jsp`,
+    '-H',
+    'Content-Type: application/x-www-form-urlencoded',
+    '--data',
+    new URLSearchParams({
+      csrf,
+      action: 'save',
+      key: propName,
+      value: propValue,
+      encrypt: 'false',
+    }).toString(),
+  ]);
+}
+
+async function fetchRestApiSettingsPage(cookieJar: string): Promise<string> {
+  // OpenFire 5.1 REST plugin serves rest-api.jsp under both restAPI/ and restapi/ paths.
+  const pages = ['plugins/restAPI/rest-api.jsp', 'plugins/restapi/rest-api.jsp'];
+  for (const p of pages) {
+    const html = await curlAdmin(cookieJar, [`${OPENFIRE_URL}/${p}`]);
+    if (html.includes('name="secret"')) return html;
+  }
+  throw new Error('REST API settings JSP not found');
+}
+
+async function saveRestApiSettings(cookieJar: string): Promise<void> {
+  await fetchRestApiSettingsPage(cookieJar);
+  for (const settingsPage of ['plugins/restAPI/rest-api.jsp', 'plugins/restapi/rest-api.jsp']) {
+    await curlAdmin(cookieJar, [
+      '-X',
+      'POST',
+      `${OPENFIRE_URL}/${settingsPage}?save`,
+      '-H',
+      'Content-Type: application/x-www-form-urlencoded',
+      '--data',
+      new URLSearchParams({
+        enabled: 'true',
+        authtype: 'secret',
+        secret: REST_SECRET,
+        loggingEnabled: 'false',
+      }).toString(),
+    ]);
+    break;
+  }
+}
+
+async function reloadRestApiPlugin(cookieJar: string): Promise<void> {
+  const page = await curlAdmin(cookieJar, [`${OPENFIRE_URL}/plugin-admin.jsp`]);
+  const csrf =
+    page.match(/id="actionForm"[\s\S]*?name="csrf"\s+value="([^"]+)"/)?.[1] ??
+    page.match(/name="csrf"\s+value="([^"]+)"/)?.[1];
+  if (!csrf) return;
+  await curlAdmin(cookieJar, [
+    '-X',
+    'POST',
+    `${OPENFIRE_URL}/plugin-admin.jsp`,
+    '-H',
+    'Content-Type: application/x-www-form-urlencoded',
+    '--data',
+    new URLSearchParams({ csrf, reloadplugin: 'restapi' }).toString(),
+  ]);
+}
+
+async function restSecretProbe(): Promise<boolean> {
+  const probe = await run('curl', [
+    '-s',
+    '-o',
+    '/dev/null',
+    '-w',
+    '%{http_code}',
+    '-H',
+    `Authorization: ${REST_SECRET}`,
+    `${OPENFIRE_URL}/plugins/restapi/v1/users`,
+  ]);
+  return probe.code === 0 && probe.stdout.trim() === '200';
+}
+
+async function ensureWildcardExcludes(cookieJar: string): Promise<void> {
+  const prop = 'adminConsole.access.allow-wildcards-in-excludes';
+  const check = await run('curl', [
+    '-s',
+    '-o',
+    '/dev/null',
+    '-w',
+    '%{http_code}',
+    '-H',
+    `Authorization: ${REST_SECRET}`,
+    `${OPENFIRE_URL}/plugins/restapi/v1/system/properties/${encodeURIComponent(prop)}`,
+  ]);
+  if (check.code === 0 && check.stdout.trim() === '200') {
+    console.log('[bootstrap] wildcard excludes property already set');
+    return;
+  }
+
+  await setServerPropertyViaAdmin(cookieJar, prop, 'true');
+  const verify = await run('curl', [
+    '-s',
+    '-o',
+    '/dev/null',
+    '-w',
+    '%{http_code}',
+    '-H',
+    `Authorization: ${REST_SECRET}`,
+    `${OPENFIRE_URL}/plugins/restapi/v1/system/properties/${encodeURIComponent(prop)}`,
+  ]);
+  if (verify.code === 0 && verify.stdout.trim() === '200') {
+    console.log('[bootstrap] set adminConsole.access.allow-wildcards-in-excludes=true');
+    return;
+  }
+  throw new Error(`failed to set wildcard excludes property (HTTP ${verify.stdout.trim()})`);
+}
+
+async function ensureRestApiSecret(cookieJar: string): Promise<void> {
+  if (await restSecretProbe()) {
+    console.log('[bootstrap] REST API shared secret already configured');
+    return;
+  }
+
+  // Wildcard excludes must be true before REST endpoints are reachable from outside the admin filter.
+  await setServerPropertyViaAdmin(cookieJar, 'adminConsole.access.allow-wildcards-in-excludes', 'true');
+  await saveRestApiSettings(cookieJar);
+  await reloadRestApiPlugin(cookieJar);
+  // Plugin reload is async; give Jetty time to re-register auth exclusions.
+  await new Promise((r) => setTimeout(r, 5000));
+
+  if (await restSecretProbe()) {
+    console.log('[bootstrap] configured REST API shared secret');
+    return;
+  }
+  throw new Error('REST API shared secret not verified after bootstrap');
+}
+
 async function main(): Promise<void> {
   const cookieJar = path.join(os.tmpdir(), `openfire-e2e-${Date.now()}.cookies`);
   await fs.writeFile(cookieJar, '');
@@ -211,6 +364,8 @@ async function main(): Promise<void> {
   await ensurePinger(cookieJar);
   await ensureHttpBind(cookieJar);
   await ensureHttpFileUpload(cookieJar);
+  await ensureRestApiSecret(cookieJar);
+  await ensureWildcardExcludes(cookieJar);
   console.log('[bootstrap] done');
   await fs.unlink(cookieJar).catch(() => undefined);
 }

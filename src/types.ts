@@ -6,6 +6,19 @@ export interface AgentGroup {
   folder: string;
   /** @deprecated Use container_configs.provider instead. */
   agent_provider: string | null;
+  /** XMPP JID when provisioned by the orchestrator. */
+  xmpp_jid?: string | null;
+  created_at: string;
+}
+
+export interface OrchestratorAgent {
+  id: string;
+  agent_group_id: string;
+  xmpp_jid: string;
+  tenant_id: string | null;
+  mock_scenario: string | null;
+  /** JSON object of extra container spawn env vars. */
+  spawn_env: string;
   created_at: string;
 }
 

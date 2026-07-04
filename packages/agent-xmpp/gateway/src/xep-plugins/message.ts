@@ -148,6 +148,7 @@ export function isAgentJid(jid: string, agentDomain: string): boolean {
 export function resolveTargetAgentJid(to: string, agentDomain: string, defaultAgent: string): string {
   const bare = to.split('/')[0];
   if (isAgentJid(bare, agentDomain)) return bare;
+  // Traffic to the bare component address is attributed to the default agent for this gateway.
   return defaultAgent;
 }
 

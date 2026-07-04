@@ -23,10 +23,26 @@ docker compose -f ../docker-compose.yml up -d openfire
 
 Default admin: `admin` / `admin`. E2E domain: `example.org` (see `openfire-demoboot.xml`).
 
+Image env defaults (for host-side scripts): `OPENFIRE_E2E_REST_SECRET=e2e-rest-secret`.
+
 ## REST API plugin
 
-After first boot, set `adminConsole.access.allow-wildcards-in-excludes=true` (required by the REST API plugin on Openfire 4.7+). E2E bootstrap can do this via the admin console or REST API.
+After first boot, bootstrap sets `adminConsole.access.allow-wildcards-in-excludes=true` and configures the REST API shared secret (required on Openfire 4.7+).
+
+Host-side E2E uses `OPENFIRE_REST_SECRET` (default `e2e-rest-secret`) or falls back to admin Basic auth.
+
+## Provisioning E2E
+
+```bash
+# from repo root — builds orchestrator, starts Openfire from this Dockerfile, runs phase 1 test
+pnpm --filter orchestrator build
+pnpm --filter @agent-xmpp/integration e2e:provision
+
+# phase 2 runtime descriptor (Openfire + gateway)
+pnpm --filter @agent-xmpp/gateway build
+pnpm --filter @agent-xmpp/integration e2e:descriptor
+```
 
 ## HTTP File Upload
 
-Enable **HTTP Binding** in Server → Server Settings → HTTP Binding for `upload_file` E2E tests.
+Enable **HTTP Binding** in Server → Server Settings → HTTP Binding for `upload_file` E2E tests (bootstrap enables this automatically).

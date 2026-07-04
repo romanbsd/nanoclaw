@@ -23,8 +23,10 @@ import {
   TIMEZONE,
 } from './config.js';
 import { materializeContainerJson } from './container-config.js';
+import { getChannelContainerConfig } from './channels/channel-registry.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars } from './db/container-configs.js';
+import { getOrchestratorAgentByGroupId } from './db/orchestrator-agents.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
@@ -452,6 +454,23 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  const xmppChannelEnv = getChannelContainerConfig('xmpp')?.env;
+  if (xmppChannelEnv) {
+    for (const [key, value] of Object.entries(xmppChannelEnv)) {
+      if (value) args.push('-e', `${key}=${value}`);
+    }
+  }
+
+  const orchAgent = getOrchestratorAgentByGroupId(agentGroup.id);
+  if (orchAgent) {
+    const spawnEnv = JSON.parse(orchAgent.spawn_env) as Record<string, string>;
+    for (const [key, value] of Object.entries(spawnEnv)) {
+      if (value) args.push('-e', `${key}=${value}`);
+    }
+  } else if (agentGroup.xmpp_jid) {
+    args.push('-e', `XMPP_AGENT_JID=${agentGroup.xmpp_jid}`);
+  }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
   if (providerContribution.env) {

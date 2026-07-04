@@ -26,6 +26,7 @@ import {
 } from './formatter.js';
 import { isUploadTraceCommand, uploadTrace } from './upload-trace.js';
 import type { AgentProvider, AgentQuery, ProviderEvent, ProviderExchange } from './providers/types.js';
+import { executeXmppToolCall } from './xmpp-tool-exec.js';
 
 const POLL_INTERVAL_MS = 1000;
 const ACTIVE_POLL_INTERVAL_MS = 500;
@@ -481,6 +482,19 @@ export async function processQuery(
 
   try {
     for await (const event of query.events) {
+      if (event.type === 'tool_call') {
+        try {
+          await executeXmppToolCall(event.tool, event.args);
+          log(`Tool call ok: ${event.tool}`);
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          log(`Tool call failed (${event.tool}): ${errMsg}`);
+        }
+        touchHeartbeat();
+        handleEvent(event, routing);
+        continue;
+      }
+
       handleEvent(event, routing);
       touchHeartbeat();
 
@@ -601,6 +615,9 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
+      break;
+    case 'tool_call':
+      log(`Tool call: ${event.tool}`);
       break;
   }
 }

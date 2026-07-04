@@ -1,8 +1,8 @@
 /**
  * XMPP channel bridge — thin ChannelAdapter that forwards to agent-xmpp-gateway.
  *
- * Gateway pushes inbound stanzas via webhook; bridge calls host onInbound().
- * Outbound deliver() posts to gateway HTTP API.
+ * Gateway pushes inbound stanzas via webhook; bridge calls host onInboundEvent()
+ * with recipient agent JID in `instance`. Outbound deliver() posts to gateway HTTP API.
  */
 import http from 'http';
 
@@ -44,7 +44,7 @@ async function deliverToGateway(
   platformId: string,
   threadId: string | null,
   message: OutboundMessage,
-  defaultAgentJid: string,
+  fromJid: string,
 ): Promise<string | undefined> {
   const content =
     typeof message.content === 'string'
@@ -61,7 +61,7 @@ async function deliverToGateway(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      from: defaultAgentJid,
+      from: fromJid,
       to: platformId,
       threadId,
       content,
@@ -80,14 +80,9 @@ async function deliverToGateway(
 
 function createAdapter(): ChannelAdapter | null {
   const secret = webhookSecret();
-  const defaultAgentJid = process.env.XMPP_DEFAULT_AGENT_JID || xmppEnv().XMPP_DEFAULT_AGENT_JID || '';
+  const fallbackFromJid = process.env.XMPP_DEFAULT_AGENT_JID || xmppEnv().XMPP_DEFAULT_AGENT_JID || '';
 
-  if (!defaultAgentJid) {
-    log.info('XMPP bridge disabled: XMPP_DEFAULT_AGENT_JID not set');
-    return null;
-  }
-
-  let hostOnInbound: ChannelSetup['onInbound'] | null = null;
+  let hostOnInboundEvent: ChannelSetup['onInboundEvent'] | null = null;
   let server: http.Server | null = null;
   let connected = false;
 
@@ -97,7 +92,7 @@ function createAdapter(): ChannelAdapter | null {
     supportsThreads: true,
 
     async setup(config) {
-      hostOnInbound = config.onInbound;
+      hostOnInboundEvent = config.onInboundEvent;
 
       server = http.createServer((req, res) => {
         if (req.method !== 'POST' || req.url !== '/internal/xmpp/inbound') {
@@ -120,7 +115,20 @@ function createAdapter(): ChannelAdapter | null {
             try {
               const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as BridgeInboundPayload;
               const inbound = nanoclawInboundFromBridge(body);
-              await hostOnInbound!(body.platformId, body.threadId, inbound);
+              await hostOnInboundEvent!({
+                channelType: 'xmpp',
+                instance: body.agentJid,
+                platformId: body.platformId,
+                threadId: body.threadId,
+                message: {
+                  id: inbound.id,
+                  kind: inbound.kind,
+                  content: JSON.stringify(inbound.content),
+                  timestamp: inbound.timestamp,
+                  isMention: inbound.isMention ?? true,
+                  isGroup: inbound.isGroup,
+                },
+              });
               res.writeHead(200, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ ok: true }));
             } catch (err) {
@@ -153,8 +161,12 @@ function createAdapter(): ChannelAdapter | null {
       return connected;
     },
 
-    async deliver(platformId, threadId, message) {
-      return deliverToGateway(platformId, threadId, message, defaultAgentJid);
+    async deliver(platformId, threadId, message, options) {
+      const fromJid = options?.fromJid || fallbackFromJid;
+      if (!fromJid) {
+        throw new Error('XMPP deliver requires fromJid (set XMPP_DEFAULT_AGENT_JID or provision agent xmpp_jid)');
+      }
+      return deliverToGateway(platformId, threadId, message, fromJid);
     },
 
     async resolveChannelName(platformId) {

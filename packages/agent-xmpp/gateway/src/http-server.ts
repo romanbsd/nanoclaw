@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import type {
   OutboundDeliverRequest,
   OutboundDeliverResponse,
+  PublishAgentDescriptorRequest,
   XmppAckInput,
   XmppDiscoverAgentsInput,
   XmppGetArchiveInput,
@@ -29,6 +30,7 @@ import { buildJoinPresence, buildLeavePresence, buildRoomMessage } from './xep-p
 import { defaultPubsubService, buildPublish } from './xep-plugins/pubsub.js';
 import { buildAckStanza } from './xep-plugins/receipts.js';
 import type { SendStanzaFn } from './stanza-router.js';
+import { deliverLocalAgentMessage } from './agent-local-delivery.js';
 import { xml } from './xmpp-component.js';
 
 export interface HttpServerDeps {
@@ -53,6 +55,15 @@ export async function createHttpServer(deps: HttpServerDeps) {
     stanza = applyStoreHints(stanza);
     await send(stanza);
     const messageId = (stanza.attrs.id as string) || '';
+    // OpenFire may deliver agent→agent stanzas to user sessions; loop back through the bridge locally.
+    await deliverLocalAgentMessage(config, mailbox, {
+      fromJid,
+      toJid: body.to,
+      messageId,
+      body: body.content,
+      threadId: body.threadId ?? undefined,
+      replyTo: body.inReplyTo ?? undefined,
+    }).catch(() => undefined);
     const res: OutboundDeliverResponse = { messageId };
     return reply.send(res);
   });
@@ -92,6 +103,15 @@ export async function createHttpServer(deps: HttpServerDeps) {
       fromJid,
     );
     await send(applyStoreHints(stanza, req.body.policy));
+    // Same loopback as /v1/outbound/deliver — xmpp.send_message targets other agents by JID.
+    await deliverLocalAgentMessage(config, mailbox, {
+      fromJid,
+      toJid: req.body.to,
+      messageId: stanza.attrs.id as string,
+      body: req.body.body,
+      threadId: req.body.threadId,
+      replyTo: req.body.replyTo,
+    }).catch(() => undefined);
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -172,13 +192,69 @@ export async function createHttpServer(deps: HttpServerDeps) {
   });
 
   app.post<{ Body: XmppDiscoverAgentsInput }>('/v1/tools/xmpp.discover_agents', async (req, reply) => {
-    agentRegistry.register({
-      jid: config.defaultAgentJid,
-      name: 'Default Agent',
-      capabilities: ['chat', 'muc', 'pubsub', 'mam', 'file-upload'],
-      status: 'available',
-    });
     return reply.send({ agents: agentRegistry.discover(req.body) });
+  });
+
+  app.post<{ Body: PublishAgentDescriptorRequest }>('/v1/agents/publish_descriptor', async (req, reply) => {
+    // Called by agent-runner on wake; feeds xmpp.discover_agents and capability-based routing.
+    const descriptor = req.body;
+    if (!descriptor.jid || !descriptor.tools || !descriptor.model || !descriptor.provider) {
+      return reply.status(400).send({ error: 'Invalid descriptor: jid, tools, model, and provider are required' });
+    }
+
+    const secret = process.env.XMPP_DESCRIPTOR_SECRET;
+    if (secret) {
+      const auth = req.headers.authorization;
+      if (auth !== secret) {
+        return reply.status(401).send({ error: 'Unauthorized' });
+      }
+    }
+
+    const toolNames = descriptor.tools.map((t) => t.name);
+    const presenceStatus =
+      descriptor.availability === 'busy'
+        ? 'busy'
+        : descriptor.availability === 'offline'
+          ? 'offline'
+          : 'available';
+
+    agentRegistry.register({
+      jid: descriptor.jid,
+      name: descriptor.jid.split('@')[0],
+      capabilities: [...toolNames, ...descriptor.supportedProtocols],
+      status: presenceStatus,
+      metadata: { runtimeDescriptor: descriptor },
+    });
+
+    const show = descriptor.availability === 'busy' ? 'dnd' : undefined;
+    const type = descriptor.availability === 'offline' ? 'unavailable' : undefined;
+    const children = [xml('status', {}, `health:${descriptor.health}`)];
+    if (show) children.unshift(xml('show', {}, show));
+    await send(xml('presence', { from: descriptor.jid, type }, ...children));
+
+    const service = defaultPubsubService(config.agentDomain);
+    const node = `agent-descriptor/${descriptor.jid.replace('@', '/')}`;
+    await send(
+      buildPublish(descriptor.jid, service, {
+        node,
+        eventType: 'agent.runtime_descriptor',
+        id: descriptor.publishedAt,
+        body: descriptor,
+        contentType: 'application/vnd.agent-xmpp.runtime-descriptor+json',
+      }),
+    );
+
+    return reply.send({ ok: true, jid: descriptor.jid });
+  });
+
+  app.post<{ Body: { jid: string } }>('/v1/agents/unregister', async (req, reply) => {
+    const jid = req.body?.jid;
+    if (!jid || typeof jid !== 'string') {
+      return reply.status(400).send({ error: 'jid required' });
+    }
+    agentRegistry.unregister(jid);
+    await send(xml('presence', { from: jid, type: 'unavailable' }));
+    return reply.send({ ok: true, jid });
   });
 
   app.post<{ Body: XmppGetArchiveInput & { from?: string } }>('/v1/tools/xmpp.get_archive', async (req, reply) => {

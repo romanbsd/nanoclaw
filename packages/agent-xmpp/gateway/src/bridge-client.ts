@@ -3,6 +3,7 @@ import type { BridgeInboundPayload } from '@agent-xmpp/protocol';
 import type { GatewayConfig } from './config.js';
 
 export async function pushToBridge(config: GatewayConfig, payload: BridgeInboundPayload): Promise<void> {
+  // POST to NanoClaw host XMPP bridge; host writes inbound.db and wakes the agent container.
   const res = await fetch(config.bridgeWebhookUrl, {
     method: 'POST',
     headers: {

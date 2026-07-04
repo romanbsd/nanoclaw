@@ -4,6 +4,7 @@
 import type {
   OutboundDeliverRequest,
   OutboundDeliverResponse,
+  PublishAgentDescriptorRequest,
   XmppAckInput,
   XmppDiscoverAgentsInput,
   XmppGetArchiveInput,
@@ -99,5 +100,9 @@ export class GatewayClient {
 
   ack(body: XmppAckInput & { from?: string; to?: string }) {
     return this.post<{ ok: boolean }>('/v1/tools/xmpp.ack', body);
+  }
+
+  publishDescriptor(body: PublishAgentDescriptorRequest) {
+    return this.post<{ ok: boolean; jid: string }>('/v1/agents/publish_descriptor', body);
   }
 }

@@ -34,6 +34,7 @@ import { ensureMemoryScaffold } from './memory-scaffold.js';
 import './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import { runPollLoop } from './poll-loop.js';
+import { publishOfflineDescriptor, publishRuntimeDescriptor } from './xmpp-runtime-descriptor.js';
 
 function log(msg: string): void {
   console.error(`[agent-runner] ${msg}`);
@@ -106,6 +107,28 @@ async function main(): Promise<void> {
   // boot (idempotent). Default off — the trunk default (Claude) omits the flag
   // and keeps its native memory untouched.
   if (provider.usesMemoryScaffold) ensureMemoryScaffold();
+
+  const descriptorInput = {
+    jid: process.env.XMPP_AGENT_JID || '',
+    tenantId: process.env.XMPP_TENANT_ID,
+    provider: providerName,
+    model: config.model || 'default',
+    sessionId: config.agentGroupId || undefined,
+  };
+
+  if (process.env.XMPP_GATEWAY_URL && descriptorInput.jid) {
+    try {
+      await publishRuntimeDescriptor(descriptorInput);
+    } catch (err) {
+      log(`Runtime descriptor publish failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  const shutdownDescriptor = () => {
+    void publishOfflineDescriptor(descriptorInput);
+  };
+  process.on('SIGTERM', shutdownDescriptor);
+  process.on('SIGINT', shutdownDescriptor);
 
   await runPollLoop({
     provider,

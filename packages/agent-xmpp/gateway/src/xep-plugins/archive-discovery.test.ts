@@ -36,4 +36,20 @@ describe('discovery plugin', () => {
     const iq = buildDiscoInfo('bot@agents.test', 'user@example.com');
     expect(iq.name).toBe('iq');
   });
+
+  it('filters by tool names in runtime descriptor metadata', () => {
+    const reg = new AgentRegistry();
+    reg.register({
+      jid: 'crm@example.org',
+      capabilities: ['xmpp'],
+      status: 'available',
+      metadata: {
+        runtimeDescriptor: {
+          tools: [{ name: 'lookup_contact' }],
+        },
+      },
+    });
+    expect(reg.discover({ capabilities: ['lookup_contact'] })).toHaveLength(1);
+    expect(reg.discover({ capabilities: ['missing'] })).toHaveLength(0);
+  });
 });

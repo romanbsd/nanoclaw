@@ -112,7 +112,7 @@ async function compose(args: string[]): Promise<void> {
   await run('docker', ['compose', '-f', COMPOSE_FILE, ...args], { cwd: __dirname });
 }
 
-function startGateway(config: E2eStackConfig): { proc: ChildProcess; online: Promise<void> } {
+export function startGateway(config: E2eStackConfig): { proc: ChildProcess; online: Promise<void> } {
   const env = {
     ...process.env,
     XMPP_COMPONENT_JID: config.gatewayJid,
@@ -153,7 +153,7 @@ function startGateway(config: E2eStackConfig): { proc: ChildProcess; online: Pro
   return { proc: child, online };
 }
 
-async function stopGateway(child: ChildProcess | null): Promise<void> {
+export async function stopGateway(child: ChildProcess | null): Promise<void> {
   if (!child || child.killed) return;
   child.kill('SIGTERM');
   await new Promise<void>((resolve) => {
@@ -166,6 +166,44 @@ async function stopGateway(child: ChildProcess | null): Promise<void> {
       resolve();
     });
   });
+}
+
+export async function runOpenfireBootstrap(config: Pick<E2eStackConfig, 'openfireUrl' | 'xmppDomain'>): Promise<void> {
+  console.log('[e2e] bootstrapping Openfire...');
+  await run('node', [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
+    env: {
+      ...process.env,
+      OPENFIRE_URL: config.openfireUrl,
+      XMPP_DOMAIN: config.xmppDomain,
+      E2E_HTTP_BIND_PORT: process.env.E2E_HTTP_BIND_PORT || '17070',
+      OPENFIRE_REST_SECRET: process.env.OPENFIRE_REST_SECRET || 'e2e-rest-secret',
+    },
+  });
+}
+
+export async function startOpenfireOnly(): Promise<E2eStackConfig> {
+  const config = e2eConfig();
+  process.env.E2E_XMPP_PORT = config.xmppPort;
+  process.env.E2E_OPENFIRE_ADMIN_PORT = process.env.E2E_OPENFIRE_ADMIN_PORT || '19090';
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+  if (!process.env.KEEP_E2E) {
+    await compose(['down', '-v']);
+  }
+
+  console.log('[e2e] starting Openfire...');
+  await compose(['up', '-d', 'openfire']);
+  await waitForUrl(`${config.openfireUrl}/login.jsp`);
+  await waitForTcp(Number(config.xmppPort));
+  await new Promise((r) => setTimeout(r, 15000));
+  await runOpenfireBootstrap(config);
+  return config;
+}
+
+export async function stopOpenfireOnly(): Promise<void> {
+  if (!process.env.KEEP_E2E) {
+    await compose(['down', '-v']).catch(() => undefined);
+  }
 }
 
 export async function startE2eStack(): Promise<E2eStack> {
@@ -189,14 +227,7 @@ export async function startE2eStack(): Promise<E2eStack> {
   await new Promise((r) => setTimeout(r, 15000));
 
   console.log('[e2e] bootstrapping Openfire (component secret)...');
-  await run('node', [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
-    env: {
-      ...process.env,
-      OPENFIRE_URL: config.openfireUrl,
-      XMPP_DOMAIN: config.xmppDomain,
-      E2E_HTTP_BIND_PORT: process.env.E2E_HTTP_BIND_PORT || '17070',
-    },
-  });
+  await runOpenfireBootstrap(config);
 
   console.log('[e2e] starting gateway...');
   await freePort(Number(config.gatewayPort));

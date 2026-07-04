@@ -1,6 +1,7 @@
 packages:
   - 'packages/agent-xmpp/*'
   - 'packages/agent-xmpp/integration'
+  - 'packages/orchestrator'
 
 onlyBuiltDependencies:
   - better-sqlite3
