@@ -109,6 +109,23 @@ export type InboundEnvelope =
   | InboundCommand
   | InboundLifecycleEvent;
 
+/** ask_user_question payload — shared between host delivery and XMPP form rendering. */
+export interface AskQuestionOption {
+  label: string;
+  selectedLabel?: string;
+  value?: string;
+}
+
+export type AskQuestionOptionInput = string | AskQuestionOption;
+
+export interface AskQuestionPayload {
+  type: 'ask_question';
+  questionId: string;
+  title: string;
+  question: string;
+  options: AskQuestionOptionInput[];
+}
+
 /** Bridge webhook payload: routing + normalized message for NanoClaw. */
 export interface BridgeInboundPayload {
   platformId: string;
@@ -123,6 +140,24 @@ export interface BridgeInboundPayload {
   };
   agentJid: string;
   envelope: InboundMessage;
+}
+
+/** XEP-0004 form submit for ask_user_question — routed to host onAction, not the agent. */
+export interface BridgeFormResponsePayload {
+  type: 'form_response';
+  agentJid: string;
+  platformId: string;
+  threadId: string | null;
+  questionId: string;
+  selectedIndex: number;
+  userId: string;
+  timestamp: string;
+}
+
+export type BridgeWebhookPayload = BridgeInboundPayload | BridgeFormResponsePayload;
+
+export function isBridgeFormResponsePayload(payload: BridgeWebhookPayload): payload is BridgeFormResponsePayload {
+  return 'type' in payload && payload.type === 'form_response';
 }
 
 /** Gateway outbound deliver request from NanoClaw bridge. */

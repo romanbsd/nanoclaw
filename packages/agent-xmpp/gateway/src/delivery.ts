@@ -1,4 +1,4 @@
-import type { AgentMessage, BridgeInboundPayload } from '@agent-xmpp/protocol';
+import type { AgentMessage, BridgeFormResponsePayload, BridgeInboundPayload, BridgeWebhookPayload } from '@agent-xmpp/protocol';
 import { agentMessageText } from '@agent-xmpp/protocol';
 
 import type { GatewayConfig } from './config.js';
@@ -94,4 +94,41 @@ export async function pushInboundToBridge(
   const port = getRuntimeInboundPort(config);
   await port.deliver(buildBridgePayload(config, ctx));
   mailbox.markDelivered(ctx.agentMsg.id);
+}
+
+export interface FormResponseContext {
+  agentJid: string;
+  from: string;
+  stanzaType: string;
+  questionId: string;
+  selectedIndex: number;
+}
+
+export function buildFormResponsePayload(
+  _config: GatewayConfig,
+  ctx: FormResponseContext,
+): BridgeFormResponsePayload {
+  const room = mucRoomFromStanza(ctx.from);
+  const isGroup = ctx.stanzaType === 'groupchat' || !!room;
+  const platformId = isGroup && room ? room : ctx.from.split('/')[0];
+  const threadId = isGroup ? room || null : null;
+
+  return {
+    type: 'form_response',
+    agentJid: ctx.agentJid,
+    platformId,
+    threadId,
+    questionId: ctx.questionId,
+    selectedIndex: ctx.selectedIndex,
+    userId: ctx.from.split('/')[0],
+    timestamp: new Date().toISOString(),
+  };
+}
+
+export async function pushFormResponseToBridge(
+  config: GatewayConfig,
+  ctx: FormResponseContext,
+): Promise<void> {
+  const port = getRuntimeInboundPort(config);
+  await port.deliver(buildFormResponsePayload(config, ctx));
 }

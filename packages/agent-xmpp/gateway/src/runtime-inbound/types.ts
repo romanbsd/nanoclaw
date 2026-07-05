@@ -1,4 +1,4 @@
-import type { BridgeInboundPayload } from '@agent-xmpp/protocol';
+import type { BridgeWebhookPayload } from '@agent-xmpp/protocol';
 
 /**
  * Hands normalized inbound XMPP traffic to the agent runtime.
@@ -8,7 +8,7 @@ import type { BridgeInboundPayload } from '@agent-xmpp/protocol';
  */
 export interface RuntimeInboundPort {
   readonly kind: string;
-  deliver(payload: BridgeInboundPayload): Promise<void>;
+  deliver(payload: BridgeWebhookPayload): Promise<void>;
 }
 
 export type RuntimeInboundPortFactory = (config: import('../config.js').GatewayConfig) => RuntimeInboundPort;

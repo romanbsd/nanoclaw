@@ -5,6 +5,7 @@ import type { AgentMessage } from '@agent-xmpp/protocol';
 import { sendComposingForAgent } from './agent-send.js';
 import type { GatewayConfig } from './config.js';
 import {
+  pushFormResponseToBridge,
   pushInboundToBridge,
   resolveInboundChatTargets,
   shouldAcceptStanza,
@@ -16,6 +17,7 @@ import {
   resolveTargetAgentJid,
   stanzaToAgentMessage,
 } from './xep-plugins/message.js';
+import { parseAskQuestionSubmit } from './xep-plugins/data-form.js';
 import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
 
 export type SendStanzaFn = (stanza: Element) => Promise<void>;
@@ -45,6 +47,19 @@ export class StanzaRouter {
     // C2S inbox receives agent self-sent stanzas (outbound loopback) — drop them.
     if (fromBare && agentBare && fromBare === agentBare) return;
     if (isAckOrReceiptStanza(stanza)) return;
+
+    const formSubmit = parseAskQuestionSubmit(stanza);
+    if (formSubmit) {
+      const type = (stanza.attrs.type as string) || 'chat';
+      await pushFormResponseToBridge(this.config, {
+        agentJid,
+        from,
+        stanzaType: type,
+        questionId: formSubmit.questionId,
+        selectedIndex: formSubmit.selectedIndex,
+      });
+      return;
+    }
 
     const agentMsg = stanzaToAgentMessage(stanza, this.config.agentDomain);
     if (!agentMsg) return;

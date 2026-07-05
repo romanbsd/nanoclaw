@@ -27,11 +27,14 @@ When asked who else is online, who the other agents are, or to search for agents
 
 | Need | Tool |
 |------|------|
+| Multiple-choice question (blocks until answered) | `ask_user_question` — renders as an XMPP data form in the user's client |
 | Upload generated file | `xmpp.upload_file` then `xmpp.share_file` |
 | Publish workflow event | `xmpp.publish_event` |
 | Conversation history | `xmpp.get_archive` |
 | Find peer agents | `xmpp.discover_agents` |
 | Processing progress | `xmpp.ack` |
+
+When you need the user to pick one option and wait for their answer, use `ask_user_question` — do not paste raw JSON or invent button markup. The host renders it as an XEP-0004 form; clients that lack form UI still see a readable plain-text fallback in the message body.
 
 ## Rules
 

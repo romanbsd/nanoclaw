@@ -6,10 +6,16 @@
  */
 import http from 'http';
 
+import { getAskQuestionRender } from '../db/sessions.js';
 import { readEnvFile } from '../env.js';
 import { log } from '../log.js';
 import { registerChannelAdapter } from './channel-registry.js';
-import { nanoclawInboundFromBridge, type BridgeInboundPayload } from '@agent-xmpp/protocol';
+import { resolveAskQuestionSelection } from './ask-question.js';
+import {
+  isBridgeFormResponsePayload,
+  nanoclawInboundFromBridge,
+  type BridgeWebhookPayload,
+} from '@agent-xmpp/protocol';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 
 const DEFAULT_GATEWAY = 'http://127.0.0.1:9220';
@@ -93,8 +99,30 @@ function createAdapter(): ChannelAdapter | null {
   const fallbackFromJid = process.env.XMPP_DEFAULT_AGENT_JID || xmppEnv().XMPP_DEFAULT_AGENT_JID || '';
 
   let hostOnInboundEvent: ChannelSetup['onInboundEvent'] | null = null;
+  let hostOnAction: ChannelSetup['onAction'] | null = null;
   let server: http.Server | null = null;
   let connected = false;
+
+  async function handleFormResponse(payload: Extract<BridgeWebhookPayload, { type: 'form_response' }>): Promise<void> {
+    const render = getAskQuestionRender(payload.questionId);
+    const selectedOption = resolveAskQuestionSelection(render, payload.selectedIndex);
+    const title = render?.title ?? 'Question';
+    const matched = render?.options[payload.selectedIndex];
+    const selectedLabel = matched?.selectedLabel ?? selectedOption;
+
+    try {
+      await gatewayPost('/v1/outbound/deliver', {
+        from: payload.agentJid,
+        to: payload.platformId,
+        threadId: payload.threadId,
+        content: `${title}\n\n${selectedLabel}`,
+      });
+    } catch (err) {
+      log.warn('Failed to send XMPP form selection confirmation', { questionId: payload.questionId, err });
+    }
+
+    hostOnAction!(payload.questionId, selectedOption, payload.userId);
+  }
 
   return {
     name: 'XMPP',
@@ -103,6 +131,7 @@ function createAdapter(): ChannelAdapter | null {
 
     async setup(config) {
       hostOnInboundEvent = config.onInboundEvent;
+      hostOnAction = config.onAction;
 
       server = http.createServer((req, res) => {
         if (req.method !== 'POST' || req.url !== '/internal/xmpp/inbound') {
@@ -123,7 +152,15 @@ function createAdapter(): ChannelAdapter | null {
         req.on('end', () => {
           void (async () => {
             try {
-              const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as BridgeInboundPayload;
+              const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as BridgeWebhookPayload;
+
+              if (isBridgeFormResponsePayload(body)) {
+                await handleFormResponse(body);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true }));
+                return;
+              }
+
               const inbound = nanoclawInboundFromBridge(body);
               await hostOnInboundEvent!({
                 channelType: 'xmpp',

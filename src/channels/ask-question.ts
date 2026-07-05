@@ -44,6 +44,16 @@ export function normalizeOptions(raws: RawOption[]): NormalizedOption[] {
   return raws.map(normalizeOption);
 }
 
+export function resolveAskQuestionSelection(
+  render: { options: NormalizedOption[] } | undefined,
+  selectedIndex: number,
+): string {
+  if (render?.options[selectedIndex]) {
+    return render.options[selectedIndex].value;
+  }
+  return String(selectedIndex);
+}
+
 export interface AskQuestionPayload {
   type: 'ask_question';
   questionId: string;

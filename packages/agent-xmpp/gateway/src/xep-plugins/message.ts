@@ -12,6 +12,8 @@ import type {
   XmppSourceMetadata,
 } from '@agent-xmpp/protocol';
 
+import { buildAskQuestionFormStanza, isAskQuestionContent } from './data-form.js';
+
 const JSON_NS = 'urn:xmpp:json-msg:0';
 const ORIGIN_ID_NS = 'urn:xmpp:sid:0';
 const REPLY_NS = 'urn:xmpp:reply:0';
@@ -153,6 +155,10 @@ export function resolveTargetAgentJid(to: string, agentDomain: string, defaultAg
 }
 
 export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string): Element {
+  if (isAskQuestionContent(req.content)) {
+    return buildAskQuestionFormStanza(req, fromJid, req.content);
+  }
+
   const id = ulid();
   const text =
     typeof req.content === 'string'

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { xml } from '@xmpp/xml';
 
-import { extractStableId, isAgentJid, stanzaToAgentMessage } from './message.js';
+import type { AskQuestionPayload } from '@agent-xmpp/protocol';
+
+import { DATA_FORM_NS } from './data-form.js';
+import { buildOutboundStanza, extractStableId, isAgentJid, stanzaToAgentMessage } from './message.js';
 
 describe('message plugin', () => {
   it('extracts stable id from stanza id attribute', () => {
@@ -45,5 +48,22 @@ describe('message plugin', () => {
     const msg = stanzaToAgentMessage(stanza, 'agents.test');
     expect(msg!.kind).toBe('task');
     expect((msg!.body as { task: string }).task).toBe('Do something');
+  });
+
+  it('builds XEP-0004 form for ask_question payloads', () => {
+    const payload: AskQuestionPayload = {
+      type: 'ask_question',
+      questionId: 'msg-1',
+      title: 'Confirm',
+      question: 'Proceed?',
+      options: ['Yes', 'No'],
+    };
+    const stanza = buildOutboundStanza(
+      { from: 'agent@agents.test', to: 'human@example.com', content: payload },
+      'agent@agents.test',
+    );
+    expect(stanza.getChild('x', DATA_FORM_NS)).not.toBeNull();
+    expect(stanza.getChildText('body')).toContain('Proceed?');
+    expect(stanza.getChild('payload', 'urn:xmpp:json-msg:0')).toBeUndefined();
   });
 });
