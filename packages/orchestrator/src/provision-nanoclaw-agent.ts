@@ -8,6 +8,11 @@ import {
   createMessagingGroup,
   createMessagingGroupAgent,
   createOrchestratorAgent,
+  deleteAgentGroup,
+  deleteContainerConfig,
+  deleteMessagingGroup,
+  deleteMessagingGroupAgent,
+  deleteOrchestratorAgent,
   ensureContainerConfig,
   getAgentGroupByFolder,
   getMessagingGroupByPlatform,
@@ -19,7 +24,7 @@ import { initGroupFilesystem } from '../../../src/group-init.js';
 import { normalizeName } from '../../../src/modules/agent-to-agent/db/agent-destinations.js';
 import type { AgentGroup, OrchestratorAgent } from '../../../src/types.js';
 import { provisionAgentIdentity } from './provision-identity.js';
-import type { OpenfireClient } from './openfire-client.js';
+import { OpenfireClient, loadOpenfireConfigFromEnv, usernameFromJid } from './openfire-client.js';
 import type { OpenfireClientConfig } from './openfire-client.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -187,100 +192,128 @@ export async function provisionNanoclawAgent(
   const now = new Date().toISOString();
   const agentGroupId = generateId('ag');
   const orchestratorId = generateId('orch');
-
-  const agentGroup: AgentGroup = {
-    id: agentGroupId,
-    name: request.name,
-    folder,
-    agent_provider: null,
-    xmpp_jid: identity.jid,
-    created_at: now,
-  };
-  createAgentGroup(agentGroup);
-
   const provider = request.provider || 'mock';
-  const instructions = request.personality?.instructions;
-  initGroupFilesystem(agentGroup, { instructions, provider });
+  const model = request.model || (provider === 'mock' ? 'mock' : undefined);
 
-  ensureContainerConfig(agentGroupId);
-  updateContainerConfigScalars(agentGroupId, {
-    provider,
-    model: request.model || (provider === 'mock' ? 'mock' : undefined),
-    assistant_name: request.personality?.assistantName || request.displayName,
-  });
-  updateContainerConfigJson(agentGroupId, 'skills', request.skills ?? []);
-  updateContainerConfigJson(agentGroupId, 'mcp_servers', buildMcpServers(request.mcpServers, containerGateway));
+  // Undo stack: on any failure after the XMPP identity is created, unwind every
+  // side effect (DB rows, folder, and the OpenFire user) so nothing leaks.
+  const rollback: Array<() => void | Promise<void>> = [
+    async () => {
+      if (process.env.ORCHESTRATOR_SKIP_OPENFIRE === '1') return;
+      const client = options.openfireClient ?? new OpenfireClient(loadOpenfireConfigFromEnv());
+      await client.deleteUser(usernameFromJid(identity.jid));
+    },
+  ];
 
-  const mgId = generateId('mg');
-  // One messaging_group per agent JID (instance=xmpp); re-use if orchestrator re-provisions same JID.
-  const existingMg = getMessagingGroupByPlatform('xmpp', identity.jid, 'xmpp');
-  const messagingGroupId = existingMg?.id ?? mgId;
-  if (!existingMg) {
-    createMessagingGroup({
-      id: mgId,
-      channel_type: 'xmpp',
-      platform_id: identity.jid,
-      instance: 'xmpp',
-      name: request.displayName,
-      is_group: 0,
-      unknown_sender_policy: 'public',
+  try {
+    const agentGroup: AgentGroup = {
+      id: agentGroupId,
+      name: request.name,
+      folder,
+      agent_provider: null,
+      xmpp_jid: identity.jid,
       created_at: now,
-    });
-  }
+    };
+    createAgentGroup(agentGroup);
+    rollback.push(() => deleteAgentGroup(agentGroupId));
 
-  if (!getMessagingGroupAgentByPair(messagingGroupId, agentGroupId)) {
-    createMessagingGroupAgent({
-      id: generateId('mga'),
-      messaging_group_id: messagingGroupId,
+    const instructions = request.personality?.instructions;
+    initGroupFilesystem(agentGroup, { instructions, provider });
+    rollback.push(() => removeAgentGroupFolder(folder));
+
+    ensureContainerConfig(agentGroupId);
+    rollback.push(() => deleteContainerConfig(agentGroupId));
+    updateContainerConfigScalars(agentGroupId, {
+      provider,
+      model,
+      assistant_name: request.personality?.assistantName || request.displayName,
+    });
+    updateContainerConfigJson(agentGroupId, 'skills', request.skills ?? []);
+    updateContainerConfigJson(agentGroupId, 'mcp_servers', buildMcpServers(request.mcpServers, containerGateway));
+
+    const mgId = generateId('mg');
+    // One messaging_group per agent JID (instance=xmpp); re-use if orchestrator re-provisions same JID.
+    const existingMg = getMessagingGroupByPlatform('xmpp', identity.jid, 'xmpp');
+    const messagingGroupId = existingMg?.id ?? mgId;
+    if (!existingMg) {
+      createMessagingGroup({
+        id: mgId,
+        channel_type: 'xmpp',
+        platform_id: identity.jid,
+        instance: 'xmpp',
+        name: request.displayName,
+        is_group: 0,
+        unknown_sender_policy: 'public',
+        created_at: now,
+      });
+      rollback.push(() => deleteMessagingGroup(mgId));
+    }
+
+    if (!getMessagingGroupAgentByPair(messagingGroupId, agentGroupId)) {
+      const mgaId = generateId('mga');
+      createMessagingGroupAgent({
+        id: mgaId,
+        messaging_group_id: messagingGroupId,
+        agent_group_id: agentGroupId,
+        // pattern '.' + sender_scope 'all': every inbound XMPP stanza wakes this agent (A2A + external).
+        engage_mode: 'pattern',
+        engage_pattern: '.',
+        sender_scope: 'all',
+        ignored_message_policy: 'drop',
+        session_mode: 'shared',
+        priority: 0,
+        created_at: now,
+      });
+      rollback.push(() => deleteMessagingGroupAgent(mgaId));
+    }
+
+    // Injected into container spawn env; encodes XMPP identity + mock scenario knobs for agent-runner.
+    const spawnEnv = {
+      XMPP_AGENT_JID: identity.jid,
+      XMPP_GATEWAY_URL: containerGateway,
+      XMPP_TENANT_ID: request.tenantId,
+      ...(request.mockScenario ? { MOCK_SCENARIO: request.mockScenario } : {}),
+      ...request.spawnEnv,
+    };
+
+    const orchRow: OrchestratorAgent = {
+      id: orchestratorId,
       agent_group_id: agentGroupId,
-      // pattern '.' + sender_scope 'all': every inbound XMPP stanza wakes this agent (A2A + external).
-      engage_mode: 'pattern',
-      engage_pattern: '.',
-      sender_scope: 'all',
-      ignored_message_policy: 'drop',
-      session_mode: 'shared',
-      priority: 0,
+      xmpp_jid: identity.jid,
+      tenant_id: request.tenantId,
+      mock_scenario: request.mockScenario ?? null,
+      spawn_env: JSON.stringify(spawnEnv),
       created_at: now,
-    });
+    };
+    createOrchestratorAgent(orchRow);
+    rollback.push(() => deleteOrchestratorAgent(orchestratorId));
+
+    await registerAgentIngress(gatewayUrl, identity.jid, identity.password);
+    await publishBootstrapDescriptor(gatewayUrl, identity.jid, request.tenantId, provider, model ?? 'default');
+
+    return {
+      orchestratorId,
+      agentGroupId,
+      folder,
+      jid: identity.jid,
+      password: identity.password,
+      messagingGroupId,
+    };
+  } catch (err) {
+    // Unwind in reverse; each step is best-effort so one failure can't strand the rest.
+    for (const undo of rollback.reverse()) {
+      try {
+        await undo();
+        // eslint-disable-next-line no-catch-all/no-catch-all -- compensating cleanup is best-effort
+      } catch (cleanupErr) {
+        console.warn(
+          '[provision-nanoclaw-agent] rollback step failed:',
+          cleanupErr instanceof Error ? cleanupErr.message : cleanupErr,
+        );
+      }
+    }
+    throw err;
   }
-
-  // Injected into container spawn env; encodes XMPP identity + mock scenario knobs for agent-runner.
-  const spawnEnv = {
-    XMPP_AGENT_JID: identity.jid,
-    XMPP_GATEWAY_URL: containerGateway,
-    XMPP_TENANT_ID: request.tenantId,
-    ...(request.mockScenario ? { MOCK_SCENARIO: request.mockScenario } : {}),
-    ...request.spawnEnv,
-  };
-
-  const orchRow: OrchestratorAgent = {
-    id: orchestratorId,
-    agent_group_id: agentGroupId,
-    xmpp_jid: identity.jid,
-    tenant_id: request.tenantId,
-    mock_scenario: request.mockScenario ?? null,
-    spawn_env: JSON.stringify(spawnEnv),
-    created_at: now,
-  };
-  createOrchestratorAgent(orchRow);
-
-  await registerAgentIngress(gatewayUrl, identity.jid, identity.password);
-  await publishBootstrapDescriptor(
-    gatewayUrl,
-    identity.jid,
-    request.tenantId,
-    provider,
-    request.model || (provider === 'mock' ? 'mock' : 'default'),
-  );
-
-  return {
-    orchestratorId,
-    agentGroupId,
-    folder,
-    jid: identity.jid,
-    password: identity.password,
-    messagingGroupId,
-  };
 }
 
 export function removeAgentGroupFolder(folder: string): void {

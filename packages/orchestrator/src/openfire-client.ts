@@ -87,6 +87,17 @@ export class OpenfireClient {
     const res = await this.request('GET', `/users/${encodeURIComponent(username)}`, undefined, 'application/json');
     const text = await this.readBody(res);
     if (res.status === 404) return false;
+    // Secret auth broke but admin creds exist: retry via Basic. Without this a false
+    // negative here makes provision try to (re)create an existing user, whose failure
+    // then triggers a compensating delete that nukes the pre-existing account.
+    if (this.isAuthRedirect(res, text) && this.config.restSecret && this.config.adminUser && this.config.adminPassword) {
+      const fallback = new OpenfireClient({
+        baseUrl: this.config.baseUrl,
+        adminUser: this.config.adminUser,
+        adminPassword: this.config.adminPassword,
+      });
+      return fallback.getUser(username);
+    }
     if (!res.ok || this.isAuthRedirect(res, text)) return false;
     try {
       const data = JSON.parse(text) as { username?: string; user?: { username?: string } };
@@ -169,7 +180,7 @@ export class OpenfireClient {
   }
 }
 
-function escapeXml(value: string): string {
+export function escapeXml(value: string): string {
   return value
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

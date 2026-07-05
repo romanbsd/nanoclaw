@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   closeDb,
   getAgentGroup,
+  getAgentGroupByFolder,
   getAgentGroupByXmppJid,
   getContainerConfig,
   getDb,
@@ -93,5 +94,36 @@ describe('provisionNanoclawAgent', () => {
     expect(spawnEnv.MOCK_ACCOUNTANT_JID).toBe('other@example.org');
 
     removeAgentGroupFolder(result.folder);
+  });
+
+  it('rolls back all state and deletes the xmpp user when a gateway call fails', async () => {
+    // Gateway is down: registerAgentIngress (the first fetch after the DB writes) rejects.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
+
+    await expect(
+      provisionNanoclawAgent(
+        {
+          name: 'Fail Agent',
+          agentId: 'fail-agent',
+          tenantId: 'example.org',
+          displayName: 'Fail Agent',
+          provider: 'mock',
+          model: 'mock',
+        },
+        {
+          openfireClient: mockClient as unknown as OpenfireClient,
+          baseDomain: 'example.org',
+          gatewayUrl: 'http://127.0.0.1:9220',
+        },
+      ),
+    ).rejects.toThrow('ECONNREFUSED');
+
+    // No leaked rows.
+    expect(getAgentGroupByFolder('fail-agent')).toBeUndefined();
+    expect(getAgentGroupByXmppJid('fail-agent@example.org')).toBeUndefined();
+    expect(getMessagingGroupByPlatform('xmpp', 'fail-agent@example.org', 'xmpp')).toBeUndefined();
+
+    // Compensating delete removed the XMPP user created during identity provisioning.
+    expect(mockClient.deleteUser).toHaveBeenCalledWith('fail-agent');
   });
 });

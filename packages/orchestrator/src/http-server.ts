@@ -22,6 +22,20 @@ function checkAuth(authHeader: string | undefined, secret: string | undefined): 
   return authHeader === `Bearer ${secret}`;
 }
 
+function parseSpawnEnv(raw: string | null | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, string>;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- tolerate a malformed spawn_env instead of 500ing the read
+  } catch {
+    return {};
+  }
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
 export async function createOrchestratorServer(options: OrchestratorServerOptions = {}) {
   const app = Fastify({ logger: true });
   const apiSecret = options.apiSecret || process.env.ORCHESTRATOR_API_SECRET;
@@ -66,7 +80,7 @@ export async function createOrchestratorServer(options: OrchestratorServerOption
       jid: row.xmpp_jid,
       tenantId: row.tenant_id,
       mockScenario: row.mock_scenario,
-      spawnEnv: JSON.parse(row.spawn_env) as Record<string, string>,
+      spawnEnv: parseSpawnEnv(row.spawn_env),
       createdAt: row.created_at,
     };
   });
@@ -116,6 +130,12 @@ export async function startOrchestratorServer(options: OrchestratorServerOptions
   const app = await createOrchestratorServer(options);
   const port = options.port ?? Number(process.env.ORCHESTRATOR_PORT || '19300');
   const host = options.host ?? process.env.ORCHESTRATOR_HOST ?? '127.0.0.1';
+  const apiSecret = options.apiSecret || process.env.ORCHESTRATOR_API_SECRET;
+  // Fail closed: an unauthenticated server may only bind loopback. On any routable
+  // interface a missing secret would expose provision/delete to the network.
+  if (!apiSecret && !isLoopbackHost(host)) {
+    throw new Error(`orchestrator refuses to bind non-loopback host ${host} without ORCHESTRATOR_API_SECRET`);
+  }
   await app.listen({ port, host });
   return app;
 }
