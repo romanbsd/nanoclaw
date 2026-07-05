@@ -88,6 +88,7 @@ function containerGatewayUrl(gatewayUrl: string): string {
       url.hostname = 'host.docker.internal';
       return url.toString().replace(/\/$/, '');
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- invalid gateway URL passed through unchanged
   } catch {
     // fall through
   }
@@ -288,7 +289,11 @@ export function removeAgentGroupFolder(folder: string): void {
     if (fs.existsSync(groupDir)) {
       fs.rmSync(groupDir, { recursive: true, force: true });
     }
-  } catch {
-    // Best-effort filesystem cleanup.
+    // eslint-disable-next-line no-catch-all/no-catch-all -- best-effort filesystem cleanup during delete
+  } catch (err) {
+    console.warn(
+      `[orchestrator] agent group folder cleanup failed for ${groupDir}:`,
+      err instanceof Error ? err.message : err,
+    );
   }
 }

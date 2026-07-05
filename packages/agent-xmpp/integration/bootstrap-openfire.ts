@@ -77,6 +77,7 @@ async function login(cookieJar: string): Promise<void> {
         new URLSearchParams({ login: 'true', csrf, username: ADMIN_USER, password: ADMIN_PASS }).toString(),
       ]);
       return;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- admin login retry loop
     } catch {
       await new Promise((r) => setTimeout(r, 2000));
     }
@@ -150,6 +151,7 @@ async function waitForPluginPage(cookieJar: string, page: string, timeoutMs = 18
       ) {
         return html;
       }
+      // eslint-disable-next-line no-catch-all/no-catch-all -- plugin page wait retry loop
     } catch {
       /* retry */
     }

@@ -27,8 +27,12 @@ async function stopNanoclawContainers(): Promise<void> {
     if (ids.length > 0) {
       await execFileAsync('docker', ['rm', '-f', ...ids]);
     }
-  } catch {
-    // Best-effort — containers may already have exited.
+    // eslint-disable-next-line no-catch-all/no-catch-all -- best-effort docker cleanup before E2E
+  } catch (err) {
+    console.warn(
+      '[e2e-orchestrator-agents] docker cleanup failed (best-effort):',
+      err instanceof Error ? err.message : err,
+    );
   }
 }
 
@@ -84,6 +88,7 @@ function sessionHasInboundText(
     const rows = db.prepare('SELECT content FROM messages_in').all() as Array<{ content: string }>;
     db.close();
     return rows.some((r) => r.content.includes(needle));
+    // eslint-disable-next-line no-catch-all/no-catch-all -- session DB may not exist yet during wait loop
   } catch {
     return false;
   }

@@ -55,6 +55,7 @@ function parseJsonPayload(stanza: Element): { kind: MessageKind; contentType: st
       contentType: parsed.contentType || datatype,
       body: parsed.body ?? parsed,
     };
+    // eslint-disable-next-line no-catch-all/no-catch-all -- malformed JSON payload falls back to raw text
   } catch {
     return { kind: 'text', contentType: datatype, body: raw };
   }
@@ -99,6 +100,7 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
       if (parsed.kind) kind = parsed.kind;
       if (parsed.contentType) contentType = parsed.contentType;
       body = parsed.body ?? parsed;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- body looks like JSON but isn't; keep as plain text
     } catch {
       /* plain text */
     }

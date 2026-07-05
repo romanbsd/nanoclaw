@@ -91,6 +91,7 @@ export class OpenfireClient {
     try {
       const data = JSON.parse(text) as { username?: string; user?: { username?: string } };
       return data.username === username || data.user?.username === username;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- non-JSON getUser body falls back to substring match
     } catch {
       return text.includes(username);
     }

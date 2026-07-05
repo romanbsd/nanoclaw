@@ -131,13 +131,22 @@ async function main(): Promise<void> {
     if (peerSection) {
       instructions = `${instructions}\n\n${peerSection}`;
     }
-  }
 
-  const shutdownDescriptor = () => {
-    void publishOfflineDescriptor(descriptorInput);
-  };
-  process.on('SIGTERM', shutdownDescriptor);
-  process.on('SIGINT', shutdownDescriptor);
+    // Publish an offline descriptor on shutdown. Installing a signal listener
+    // suppresses the runtime's default terminate-on-signal, so the handler MUST
+    // call process.exit() itself — otherwise the container ignores the SIGTERM
+    // from `docker stop -t 1` and hangs until Docker escalates to SIGKILL.
+    // Gated on XMPP config so non-XMPP containers keep default signal handling.
+    let shuttingDown = false;
+    const shutdownDescriptor = async () => {
+      if (shuttingDown) return;
+      shuttingDown = true;
+      await publishOfflineDescriptor(descriptorInput); // never throws (catches internally)
+      process.exit(0);
+    };
+    process.on('SIGTERM', shutdownDescriptor);
+    process.on('SIGINT', shutdownDescriptor);
+  }
 
   await runPollLoop({
     provider,

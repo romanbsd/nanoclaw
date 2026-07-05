@@ -491,7 +491,6 @@ export async function processQuery(
           log(`Tool call failed (${event.tool}): ${errMsg}`);
         }
         touchHeartbeat();
-        handleEvent(event, routing);
         continue;
       }
 
@@ -615,9 +614,6 @@ function handleEvent(event: ProviderEvent, _routing: RoutingContext): void {
       break;
     case 'progress':
       log(`Progress: ${event.message}`);
-      break;
-    case 'tool_call':
-      log(`Tool call: ${event.tool}`);
       break;
   }
 }

@@ -85,6 +85,7 @@ export async function createOrchestratorServer(options: OrchestratorServerOption
         jid: result.jid,
         messagingGroupId: result.messagingGroupId,
       });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- map provision errors to HTTP 400
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(400).send({ error: message });
@@ -98,6 +99,7 @@ export async function createOrchestratorServer(options: OrchestratorServerOption
         gatewayUrl: options.gatewayUrl,
       });
       return reply.status(204).send();
+      // eslint-disable-next-line no-catch-all/no-catch-all -- map delete errors to HTTP 4xx
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('not found')) {

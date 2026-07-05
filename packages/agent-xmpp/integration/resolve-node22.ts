@@ -14,6 +14,7 @@ function nodeMajor(bin: string): number | null {
     }).trim();
     const major = Number(out);
     return Number.isFinite(major) ? major : null;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- node binary probe; try next candidate
   } catch {
     return null;
   }
@@ -46,6 +47,7 @@ function node22Candidates(): string[] {
         pushUnique(list, path.join(versionsDir, v, 'bin/node'));
       }
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- unreadable nvm dir; try other candidates
   } catch {
     // ignore unreadable nvm dir
   }
@@ -62,6 +64,7 @@ function node22Candidates(): string[] {
         pushUnique(list, path.join(fnmMultis, v, 'installation/bin/node'));
       }
     }
+    // eslint-disable-next-line no-catch-all/no-catch-all -- unreadable fnm dir; try other candidates
   } catch {
     // ignore unreadable fnm dir
   }
@@ -69,6 +72,7 @@ function node22Candidates(): string[] {
   try {
     const onPath = execFileSync('sh', ['-lc', 'command -v node'], { encoding: 'utf8' }).trim();
     pushUnique(list, onPath);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- node not on PATH; try other candidates
   } catch {
     // ignore
   }
@@ -100,6 +104,7 @@ export function resolveNode22Version(): string {
   const bin = resolveNode22Bin();
   try {
     return execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim();
+    // eslint-disable-next-line no-catch-all/no-catch-all -- version probe fallback for logging only
   } catch {
     return 'v22.x';
   }

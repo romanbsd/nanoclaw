@@ -7,6 +7,7 @@ function sqliteAvailable(): boolean {
     const m = new Mailbox(`${process.cwd()}/data/probe-${Date.now()}`);
     m.close();
     return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- sqlite probe; absence means skip tests
   } catch {
     return false;
   }

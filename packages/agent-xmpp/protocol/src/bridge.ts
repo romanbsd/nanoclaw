@@ -16,6 +16,7 @@ export function agentMessageFromNanoclawContent(raw: string): AgentMessage | nul
     const parsed = JSON.parse(raw) as { envelope?: InboundMessage };
     if (parsed.envelope?.type !== 'inbound.message') return null;
     return parsed.envelope.message;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- malformed inbound content returns null
   } catch {
     return null;
   }

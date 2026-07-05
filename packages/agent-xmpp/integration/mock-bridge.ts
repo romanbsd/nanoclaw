@@ -116,6 +116,7 @@ export function startMockBridge(): Promise<http.Server> {
       await handleInbound(payload);
       res.writeHead(200);
       res.end('ok');
+      // eslint-disable-next-line no-catch-all/no-catch-all -- return HTTP 500 to caller; must not crash server
     } catch (err) {
       console.error('[mock-bridge] error:', err);
       res.writeHead(500);

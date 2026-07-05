@@ -21,6 +21,7 @@ export async function injectViaCliSocket(
       settled = true;
       try {
         socket.end();
+        // eslint-disable-next-line no-catch-all/no-catch-all -- socket.end noop during CLI inject teardown
       } catch {
         /* noop */
       }

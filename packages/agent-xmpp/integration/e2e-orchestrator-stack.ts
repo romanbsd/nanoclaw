@@ -56,6 +56,7 @@ async function waitForHealth(url: string, timeoutMs = 120_000): Promise<void> {
     try {
       const res = await curlJson(`${url}/health`);
       if (res.ok) return;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- health check retry loop
     } catch {
       // retry
     }
@@ -93,6 +94,7 @@ async function waitForCliSocket(dataDir: string, timeoutMs = 60_000): Promise<vo
     try {
       await fs.access(sockPath);
       return;
+      // eslint-disable-next-line no-catch-all/no-catch-all -- CLI socket wait retry loop
     } catch {
       await new Promise((r) => setTimeout(r, 500));
     }

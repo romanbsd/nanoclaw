@@ -106,12 +106,8 @@ export interface RoutingContext {
 
 function hasChatText(row: MessageInRow): boolean {
   if (row.kind !== 'chat' && row.kind !== 'chat-sdk') return false;
-  try {
-    const parsed = JSON.parse(row.content) as { text?: string };
-    return typeof parsed.text === 'string' && parsed.text.trim().length > 0;
-  } catch {
-    return row.content.trim().length > 0;
-  }
+  const text = parseContent(row.content).text;
+  return typeof text === 'string' && text.trim().length > 0;
 }
 
 /**

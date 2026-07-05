@@ -101,6 +101,7 @@ function rapidMlxContainerBaseUrl(hostUrl: string): string {
       url.hostname = 'host.docker.internal';
     }
     return url.toString().replace(/\/$/, '');
+    // eslint-disable-next-line no-catch-all/no-catch-all -- invalid URL falls back to docker host default
   } catch {
     return 'http://host.docker.internal:8000';
   }
@@ -136,6 +137,7 @@ async function assertRapidMlx(hostUrl: string, model: string): Promise<void> {
                 logDetail(`warning: requested model "${model}" not listed — server may still accept it`);
               }
             }
+            // eslint-disable-next-line no-catch-all/no-catch-all -- non-JSON /v1/models response is acceptable
           } catch {
             // non-JSON health response is fine
           }
@@ -143,6 +145,7 @@ async function assertRapidMlx(hostUrl: string, model: string): Promise<void> {
         return;
       }
       logDetail(`probe returned HTTP ${res.status}`);
+      // eslint-disable-next-line no-catch-all/no-catch-all -- probe loop tries alternate URLs before failing
     } catch (err) {
       logDetail(`probe failed: ${err instanceof Error ? err.message : String(err)}`);
     }

@@ -13,6 +13,7 @@ function canOpenMailbox(): boolean {
     m.close();
     fs.rmSync(dir, { recursive: true, force: true });
     return true;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- mailbox probe; absence means skip tests
   } catch {
     return false;
   }

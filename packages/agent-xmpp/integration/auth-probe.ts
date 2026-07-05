@@ -19,6 +19,7 @@ try {
   await xmpp.start();
   console.log('[auth-probe] online as', xmpp.jid?.toString());
   await xmpp.stop();
+  // eslint-disable-next-line no-catch-all/no-catch-all -- top-level probe; exit 1 on failure
 } catch (err) {
   console.error('[auth-probe] failed:', err);
   process.exit(1);

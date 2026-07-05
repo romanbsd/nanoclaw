@@ -48,6 +48,7 @@ export async function provisionAgentIdentity(
       try {
         await client.ensureSharedGroup(group);
         await client.addUserToGroup(username, group);
+        // eslint-disable-next-line no-catch-all/no-catch-all -- shared-group REST is flaky on some OpenFire builds
       } catch (err) {
         // Shared-group REST is flaky on some OpenFire builds; discovery uses gateway descriptors, not groups.
         console.warn(`[provision-identity] skipping group ${group}: ${err instanceof Error ? err.message : err}`);

@@ -76,8 +76,12 @@ export async function deleteNanoclawAgent(
       if (fs.existsSync(dir)) {
         fs.rmSync(dir, { recursive: true, force: true });
       }
-    } catch {
-      // Best-effort — running containers may hold mounts or leave root-owned files.
+      // eslint-disable-next-line no-catch-all/no-catch-all -- best-effort session dir cleanup during delete
+    } catch (err) {
+      console.warn(
+        `[orchestrator] session dir cleanup failed for ${dir}:`,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 
