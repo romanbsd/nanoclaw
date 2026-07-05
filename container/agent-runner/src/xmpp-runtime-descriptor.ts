@@ -60,6 +60,55 @@ export async function publishRuntimeDescriptor(input: RuntimeDescriptorInput): P
   log(`Published runtime descriptor for ${agentJid} (${descriptor.tools.length} tools)`);
 }
 
+interface DiscoverableAgent {
+  jid: string;
+  name?: string;
+  status?: string;
+  agentCard?: { name?: string; description?: string };
+}
+
+/** Fetch peer agents from the gateway registry for the system prompt. */
+export async function fetchPeerAgentsSection(gatewayUrl: string, selfJid: string): Promise<string> {
+  try {
+    const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/v1/tools/xmpp.discover_agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ includeUnavailable: true }),
+    });
+    if (!res.ok) return '';
+
+    const { agents } = (await res.json()) as { agents?: DiscoverableAgent[] };
+    const selfBare = selfJid.split('/')[0];
+    const peers = (agents ?? []).filter((a) => a.jid.split('/')[0] !== selfBare);
+    if (peers.length === 0) {
+      return [
+        '## Peer agents on this gateway',
+        '',
+        'No other agents are registered right now. Call `xmpp.discover_agents` for an up-to-date list.',
+      ].join('\n');
+    }
+
+    const lines = peers.map((p) => {
+      const label = p.agentCard?.name || p.name || p.jid.split('@')[0] || p.jid;
+      const status = p.status && p.status !== 'available' ? ` (${p.status})` : '';
+      const desc = p.agentCard?.description ? ` — ${p.agentCard.description}` : '';
+      return `- **${label}** \`${p.jid}\`${status}${desc}`;
+    });
+
+    return [
+      '## Peer agents on this gateway',
+      '',
+      'These are other NanoClaw agents — not the same as **destinations** (human chat peers).',
+      'Message them with `xmpp.send_message` using their JID as `to`, or call `xmpp.discover_agents` for a fresh list.',
+      '',
+      ...lines,
+    ].join('\n');
+  } catch (err) {
+    log(`Peer agent discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+    return '';
+  }
+}
+
 export async function publishOfflineDescriptor(input: RuntimeDescriptorInput): Promise<void> {
   const gatewayUrl = process.env.XMPP_GATEWAY_URL;
   if (!gatewayUrl) return;
@@ -84,5 +133,7 @@ export async function publishOfflineDescriptor(input: RuntimeDescriptorInput): P
   if (secret) headers.Authorization = secret;
 
   const url = `${gatewayUrl.replace(/\/$/, '')}/v1/agents/publish_descriptor`;
-  await fetch(url, { method: 'POST', headers, body: JSON.stringify(descriptor) }).catch(() => undefined);
+  await fetch(url, { method: 'POST', headers, body: JSON.stringify(descriptor) }).catch((err) => {
+    log(`Offline runtime descriptor publish failed: ${err instanceof Error ? err.message : String(err)}`);
+  });
 }

@@ -55,7 +55,12 @@ export async function provisionAgentIdentity(
     }
   } catch (err) {
     // Compensating delete — partial OpenFire state must not leak after a failed provision.
-    await client.deleteUser(username).catch(() => undefined);
+    await client.deleteUser(username).catch((err) => {
+      console.warn(
+        `[provision-identity] compensating delete failed for ${username}:`,
+        err instanceof Error ? err.message : err,
+      );
+    });
     throw err;
   }
 

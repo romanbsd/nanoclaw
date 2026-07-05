@@ -19,6 +19,7 @@
  */
 import fs from 'fs';
 
+import { log } from '../../log.js';
 import { heartbeatPath } from '../../session-manager.js';
 
 const TYPING_REFRESH_MS = 4000;
@@ -82,8 +83,9 @@ async function triggerTyping(
 ): Promise<void> {
   try {
     await adapter?.setTyping?.(channelType, platformId, threadId, instance);
-  } catch {
-    // Typing is best-effort — don't let it fail delivery or routing.
+    // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
+  } catch (err) {
+    log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
   }
 }
 
@@ -112,7 +114,9 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(channelType, platformId, threadId, instance).catch(() => {});
+    triggerTyping(channelType, platformId, threadId, instance).catch((err) => {
+      log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
+    });
     existing.startedAt = Date.now();
     existing.pausedUntil = 0;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
@@ -129,7 +133,9 @@ export function startTypingRefresh(
   }
 
   // Immediate tick + periodic refresh.
-  triggerTyping(channelType, platformId, threadId, instance).catch(() => {});
+  triggerTyping(channelType, platformId, threadId, instance).catch((err) => {
+    log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
+  });
   const startedAt = Date.now();
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
@@ -142,7 +148,14 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance).catch(() => {});
+      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance).catch((err) => {
+        log.debug('Typing indicator failed (best-effort)', {
+          channelType: entry.channelType,
+          platformId: entry.platformId,
+          threadId: entry.threadId,
+          err,
+        });
+      });
       return;
     }
 

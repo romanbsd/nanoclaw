@@ -27,6 +27,13 @@ describe('provisionNanoclawAgent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: async () => '',
+      }),
+    );
     mockClient.getUser.mockResolvedValue(false);
     mockClient.createUser.mockResolvedValue(undefined);
     mockClient.setVcard.mockResolvedValue(undefined);

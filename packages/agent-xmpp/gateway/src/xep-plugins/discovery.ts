@@ -6,6 +6,16 @@ import { A2A_XMPP_BINDING_URI, type A2aAgentCard, type AgentDescriptor, type Xmp
 
 const DISCO_NS = 'http://jabber.org/protocol/disco#info';
 
+/** Match capability filters across bare names and xmpp.* tool prefixes. */
+function capabilityMatches(caps: string[], required: string): boolean {
+  const bare = required.replace(/^xmpp\./, '');
+  const variants = new Set([required, bare, `xmpp.${bare}`]);
+  return caps.some((cap) => {
+    const capBare = cap.replace(/^xmpp\./, '');
+    return variants.has(cap) || variants.has(capBare) || capBare === bare;
+  });
+}
+
 export function buildDiscoInfo(to: string, from: string): Element {
   return xml('iq', { type: 'get', from, to, id: `disco-${Date.now()}` }, xml('query', { xmlns: DISCO_NS }));
 }
@@ -61,9 +71,8 @@ export class AgentRegistry {
           (a.metadata?.runtimeDescriptor as { tools?: Array<{ name: string }> } | undefined)?.tools?.map(
             (t) => t.name,
           ) ?? [];
-        // Capability filter matches both declared caps and MCP tool names from the runtime descriptor.
         const caps = [...a.capabilities, ...toolNames];
-        return input.capabilities!.every((c) => caps.includes(c));
+        return input.capabilities!.every((required) => capabilityMatches(caps, required));
       });
     }
     if (!input.includeUnavailable) {

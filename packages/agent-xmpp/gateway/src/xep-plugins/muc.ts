@@ -18,8 +18,8 @@ export function buildJoinPresence(input: XmppJoinRoomInput, agentJid: string): E
   return xml('presence', { to: roomWithNick, from: agentJid }, ...children);
 }
 
-export function buildLeavePresence(input: XmppLeaveRoomInput, agentJid: string): Element {
-  const nick = agentJid.split('@')[0];
+export function buildLeavePresence(input: XmppLeaveRoomInput, agentJid: string, nickname?: string): Element {
+  const nick = nickname || input.nickname || agentJid.split('@')[0];
   return xml('presence', {
     to: `${input.roomJid}/${nick}`,
     from: agentJid,

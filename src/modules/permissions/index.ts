@@ -630,7 +630,13 @@ registerMessageInterceptor(async (event: InboundEvent): Promise<boolean> => {
               : `⚠️ Agent "${ag.name}" was created but the channel couldn't be connected — check the host logs.`,
           }),
         )
-        .catch(() => {});
+        .catch((err) =>
+          log.error('Channel registration: agent-created confirmation DM failed', {
+            agentGroupId: ag.id,
+            approverUserId: row.approver_user_id,
+            err,
+          }),
+        );
     }
   }
   return true;

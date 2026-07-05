@@ -226,7 +226,9 @@ export function killContainer(sessionId: string, reason: string, onExit?: () => 
   log.info('Killing container', { sessionId, reason, containerName: entry.containerName });
   try {
     stopContainer(entry.containerName);
-  } catch {
+    // eslint-disable-next-line no-catch-all/no-catch-all -- escalate to SIGKILL when runtime stop fails
+  } catch (err) {
+    log.warn('stopContainer failed, escalating to SIGKILL', { sessionId, err });
     entry.process.kill('SIGKILL');
   }
 }
@@ -433,6 +435,31 @@ function selectedSkillNames(containerConfig: import('./container-config.js').Con
     : [];
 }
 
+/** Inject orchestrator-provisioned container env after OneCLI so local LLM overrides win. */
+function applyOrchestratorSpawnEnv(args: string[], agentGroup: { id: string; xmpp_jid?: string | null }): void {
+  const orchAgent = getOrchestratorAgentByGroupId(agentGroup.id);
+  if (!orchAgent) {
+    if (agentGroup.xmpp_jid) {
+      args.push('-e', `XMPP_AGENT_JID=${agentGroup.xmpp_jid}`);
+    }
+    return;
+  }
+
+  const spawnEnv = JSON.parse(orchAgent.spawn_env) as Record<string, string>;
+  const blockedHosts =
+    spawnEnv.BLOCKED_HOSTS?.split(',')
+      .map((h) => h.trim())
+      .filter(Boolean) ?? [];
+  for (const host of blockedHosts) {
+    args.push('--add-host', `${host}:0.0.0.0`);
+  }
+
+  for (const [key, value] of Object.entries(spawnEnv)) {
+    if (key === 'BLOCKED_HOSTS' || !value) continue;
+    args.push('-e', `${key}=${value}`);
+  }
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
@@ -460,16 +487,6 @@ async function buildContainerArgs(
     for (const [key, value] of Object.entries(xmppChannelEnv)) {
       if (value) args.push('-e', `${key}=${value}`);
     }
-  }
-
-  const orchAgent = getOrchestratorAgentByGroupId(agentGroup.id);
-  if (orchAgent) {
-    const spawnEnv = JSON.parse(orchAgent.spawn_env) as Record<string, string>;
-    for (const [key, value] of Object.entries(spawnEnv)) {
-      if (value) args.push('-e', `${key}=${value}`);
-    }
-  } else if (agentGroup.xmpp_jid) {
-    args.push('-e', `XMPP_AGENT_JID=${agentGroup.xmpp_jid}`);
   }
 
   // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
@@ -522,6 +539,10 @@ async function buildContainerArgs(
     throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
   }
   log.info('OneCLI gateway applied', { containerName });
+
+  // Orchestrator spawn env is applied after OneCLI so local-model overrides
+  // (ANTHROPIC_BASE_URL, NO_PROXY) win over the credential proxy defaults.
+  applyOrchestratorSpawnEnv(args, agentGroup);
 
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
   args.push('--entrypoint', 'bash');

@@ -1,3 +1,20 @@
+declare module '@xmpp/client' {
+  import type { Element } from '@xmpp/xml';
+  export function client(options: {
+    service: string;
+    domain: string;
+    username: string;
+    password: string;
+    tls?: { rejectUnauthorized?: boolean };
+  }): {
+    on(event: 'stanza', handler: (stanza: Element) => void): void;
+    on(event: 'error', handler: (err: Error) => void): void;
+    send(stanza: Element): Promise<void>;
+    start(): Promise<void>;
+    stop(): Promise<void>;
+  };
+}
+
 declare module '@xmpp/component' {
   import type { Element } from '@xmpp/xml';
   export function component(options: {

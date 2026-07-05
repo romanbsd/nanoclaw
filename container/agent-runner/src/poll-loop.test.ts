@@ -208,6 +208,25 @@ describe('routing', () => {
     expect(routing.threadId).toBe('thread-456');
     expect(routing.inReplyTo).toBe('m1');
   });
+
+  it('prefers first chat row with text over empty receipt rows', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES ('receipt-1', 'chat', datetime('now'), 'pending', 'spark@example.org', 'xmpp', NULL, '{"text":""}')`,
+      )
+      .run();
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES ('m2', 'chat', datetime('now'), 'pending', 'john@example.org', 'xmpp', NULL, '{"text":"hello"}')`,
+      )
+      .run();
+
+    const routing = extractRouting(getPendingMessages());
+    expect(routing.platformId).toBe('john@example.org');
+    expect(routing.inReplyTo).toBe('m2');
+  });
 });
 
 describe('origin metadata (from= attribute)', () => {

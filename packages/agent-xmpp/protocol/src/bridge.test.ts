@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { BridgeInboundPayload, InboundMessage } from './agent-message.js';
-import { agentMessageText, nanoclawInboundFromBridge } from './bridge.js';
+import {
+  agentMessageFromNanoclawContent,
+  agentMessageText,
+  isXmppAgentEnvelope,
+  nanoclawInboundFromBridge,
+} from './bridge.js';
 
 const envelope: InboundMessage = {
   type: 'inbound.message',
@@ -37,6 +42,47 @@ const payload: BridgeInboundPayload = {
   },
   envelope,
 };
+
+describe('isXmppAgentEnvelope', () => {
+  it('treats plain human text as non-agent envelope', () => {
+    expect(
+      isXmppAgentEnvelope({
+        id: 'm1',
+        from: 'human@example.com',
+        to: 'planner@agents.example',
+        kind: 'text',
+        contentType: 'text/plain',
+        body: 'Hello agent',
+      }),
+    ).toBe(false);
+  });
+
+  it('treats XEP-0432 task payloads as agent envelope', () => {
+    expect(isXmppAgentEnvelope(envelope.message)).toBe(true);
+  });
+
+  it('treats structured agent text payloads as agent envelope', () => {
+    expect(
+      isXmppAgentEnvelope({
+        id: 'm2',
+        from: 'sender@agents.example',
+        to: 'planner@agents.example',
+        kind: 'text',
+        contentType: 'text/plain',
+        body: { text: 'ping' },
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('agentMessageFromNanoclawContent', () => {
+  it('extracts the normative message from bridge content JSON', () => {
+    const inbound = nanoclawInboundFromBridge(payload);
+    const msg = agentMessageFromNanoclawContent(JSON.stringify(inbound.content));
+    expect(msg?.kind).toBe('task');
+    expect(msg?.from).toBe('roman@example.com');
+  });
+});
 
 describe('agentMessageText', () => {
   it('returns string bodies as-is', () => {

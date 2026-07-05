@@ -52,4 +52,20 @@ describe('discovery plugin', () => {
     expect(reg.discover({ capabilities: ['lookup_contact'] })).toHaveLength(1);
     expect(reg.discover({ capabilities: ['missing'] })).toHaveLength(0);
   });
+
+  it('matches capability aliases with and without xmpp prefix', () => {
+    const reg = new AgentRegistry();
+    reg.register({
+      jid: 'mike@example.org',
+      capabilities: ['xmpp'],
+      status: 'available',
+      metadata: {
+        runtimeDescriptor: {
+          tools: [{ name: 'xmpp.send_message' }],
+        },
+      },
+    });
+    expect(reg.discover({ capabilities: ['send_message'] })).toHaveLength(1);
+    expect(reg.discover({ capabilities: ['xmpp.send_message'] })).toHaveLength(1);
+  });
 });

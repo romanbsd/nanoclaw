@@ -3,7 +3,7 @@ import { xml } from '@xmpp/xml';
 
 import { buildJoinPresence, buildRoomMessage, isMucJid } from './muc.js';
 import { buildSlotRequest, sha256Hex } from './file-upload.js';
-import { buildReceivedReceipt } from './receipts.js';
+import { buildReceivedReceipt, isAckOrReceiptStanza } from './receipts.js';
 
 describe('muc plugin', () => {
   it('builds join presence', () => {
@@ -38,5 +38,12 @@ describe('receipts plugin', () => {
   it('builds delivery receipt', () => {
     const r = buildReceivedReceipt('user@test', 'bot@agents.test', 'msg-1');
     expect(r.getChild('received', 'urn:xmpp:receipts')).toBeDefined();
+  });
+
+  it('detects receipt stanzas without body', () => {
+    const r = buildReceivedReceipt('user@test', 'bot@agents.test', 'msg-1');
+    expect(isAckOrReceiptStanza(r)).toBe(true);
+    const chat = xml('message', { type: 'chat', from: 'a@b', to: 'c@d' }, xml('body', {}, 'hi'));
+    expect(isAckOrReceiptStanza(chat)).toBe(false);
   });
 });

@@ -3,6 +3,7 @@
  * agent-xmpp-gateway — always-on XEP-0114 component gateway for NanoClaw.
  */
 import { loadConfig } from './config.js';
+import { C2sAgentIngress } from './ingress/index.js';
 import { createHttpServer } from './http-server.js';
 import { Mailbox } from './mailbox.js';
 import { StanzaRouter } from './stanza-router.js';
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
     return null;
   });
   const router = new StanzaRouter(config, mailbox, (stanza) => session.send(stanza));
+  const c2sIngress = new C2sAgentIngress(config, (stanza) => router.handleIncoming(stanza));
 
   session.onStanza((stanza) => {
     if (mamAwaiter.handleStanza(stanza, config.agentDomain)) return;
@@ -56,11 +58,12 @@ async function main(): Promise<void> {
     void router.handleIncoming(stanza);
   });
 
-  await createHttpServer({ config, mailbox, send: (s) => session.send(s), agentRegistry, pendingIq, mamAwaiter });
+  await createHttpServer({ config, mailbox, send: (s) => session.send(s), agentRegistry, c2sIngress, pendingIq, mamAwaiter });
   await session.start();
   await router.sweepPending();
 
   const shutdown = async () => {
+    await c2sIngress.stopAll();
     await session.stop();
     mailbox.close();
     process.exit(0);

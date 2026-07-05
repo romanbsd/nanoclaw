@@ -298,6 +298,61 @@ async function restSecretProbe(): Promise<boolean> {
   return probe.code === 0 && probe.stdout.trim() === '200';
 }
 
+async function ensureDemoMucRoom(): Promise<void> {
+  const mucService = process.env.DEMO_MUC_SERVICE_NAME || 'conference';
+  const roomName = process.env.DEMO_MUC_ROOM_NAME || 'agents-lounge';
+  const roomJid = `${roomName}@conference.${XMPP_DOMAIN}`;
+  const occupantsUrl = `${OPENFIRE_URL}/plugins/restapi/v1/chatrooms/${encodeURIComponent(roomName)}/occupants?servicename=${encodeURIComponent(mucService)}`;
+  const check = await run('curl', [
+    '-s',
+    '-o',
+    '/dev/null',
+    '-w',
+    '%{http_code}',
+    '-H',
+    `Authorization: ${REST_SECRET}`,
+    occupantsUrl,
+  ]);
+  if (check.code === 0 && check.stdout.trim() === '200') {
+    console.log(`[bootstrap] MUC room ${roomJid} already exists`);
+    return;
+  }
+
+  // OpenFire REST: POST /chatrooms?servicename=conference (not /chatrooms/conference.example.org).
+  const createUrl = `${OPENFIRE_URL}/plugins/restapi/v1/chatrooms?servicename=${encodeURIComponent(mucService)}`;
+  const body = JSON.stringify({
+    roomName,
+    naturalName: 'Agents Lounge',
+    description: 'NanoClaw demo — Jane, Mike, and human participants',
+    publicRoom: true,
+    persistent: true,
+    membersOnly: false,
+    moderated: false,
+    maxUsers: 100,
+  });
+  const create = await run('curl', [
+    '-sS',
+    '-o',
+    '/dev/null',
+    '-w',
+    '%{http_code}',
+    '-X',
+    'POST',
+    createUrl,
+    '-H',
+    `Authorization: ${REST_SECRET}`,
+    '-H',
+    'Content-Type: application/json',
+    '-d',
+    body,
+  ]);
+  const code = create.stdout.trim();
+  if (create.code !== 0 || (code !== '201' && code !== '200' && code !== '409')) {
+    throw new Error(`failed to create MUC room ${roomName} (HTTP ${code})`);
+  }
+  console.log(`[bootstrap] ensured MUC room ${roomJid}`);
+}
+
 async function ensureWildcardExcludes(cookieJar: string): Promise<void> {
   const prop = 'adminConsole.access.allow-wildcards-in-excludes';
   const check = await run('curl', [
@@ -366,6 +421,7 @@ async function main(): Promise<void> {
   await ensureHttpFileUpload(cookieJar);
   await ensureRestApiSecret(cookieJar);
   await ensureWildcardExcludes(cookieJar);
+  await ensureDemoMucRoom();
   console.log('[bootstrap] done');
   await fs.unlink(cookieJar).catch(() => undefined);
 }

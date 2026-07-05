@@ -26,7 +26,9 @@ export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHan
     if (stanza.name === 'iq' && stanza.attrs.type === 'get' && onIqGet) {
       const response = onIqGet(stanza);
       if (response) {
-        xmpp.send(response).catch(() => undefined);
+        xmpp.send(response).catch((err) => {
+          console.error('[xmpp-gateway] IQ get response send failed:', err);
+        });
         return;
       }
     }

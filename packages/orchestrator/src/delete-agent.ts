@@ -50,14 +50,23 @@ export async function deleteNanoclawAgent(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jid: record.xmpp_jid }),
     });
-  } catch {
-    // Best-effort — discovery cache clears on next publish even if unregister fails.
+  // eslint-disable-next-line no-catch-all/no-catch-all -- best-effort unregister; agent is already being deleted
+  } catch (err) {
+    console.warn(
+      '[orchestrator] gateway agent unregister failed (best-effort):',
+      err instanceof Error ? err.message : err,
+    );
   }
 
   const client = options.openfireClient ?? new OpenfireClient(loadOpenfireConfigFromEnv());
   const username = usernameFromJid(record.xmpp_jid);
   if (process.env.ORCHESTRATOR_SKIP_OPENFIRE !== '1') {
-    await client.deleteUser(username).catch(() => undefined);
+    await client.deleteUser(username).catch((err) => {
+      console.warn(
+        `[orchestrator] OpenFire deleteUser failed for ${username}:`,
+        err instanceof Error ? err.message : err,
+      );
+    });
   }
 
   for (const session of getSessionsByAgentGroup(agentGroup.id)) {

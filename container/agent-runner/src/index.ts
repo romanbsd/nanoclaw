@@ -34,7 +34,11 @@ import { ensureMemoryScaffold } from './memory-scaffold.js';
 import './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import { runPollLoop } from './poll-loop.js';
-import { publishOfflineDescriptor, publishRuntimeDescriptor } from './xmpp-runtime-descriptor.js';
+import {
+  fetchPeerAgentsSection,
+  publishOfflineDescriptor,
+  publishRuntimeDescriptor,
+} from './xmpp-runtime-descriptor.js';
 
 function log(msg: string): void {
   console.error(`[agent-runner] ${msg}`);
@@ -55,7 +59,7 @@ async function main(): Promise<void> {
   // base (/app/CLAUDE.md) and each enabled module's fragment. Per-group
   // memory lives in /workspace/agent/CLAUDE.local.md (auto-loaded).
   const taskId = getTaskSeriesId();
-  const instructions = buildSystemPromptAddendum(
+  let instructions = buildSystemPromptAddendum(
     config.assistantName || undefined,
     taskId ? { kind: 'task', taskId } : { kind: 'chat' },
   );
@@ -121,6 +125,11 @@ async function main(): Promise<void> {
       await publishRuntimeDescriptor(descriptorInput);
     } catch (err) {
       log(`Runtime descriptor publish failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    const peerSection = await fetchPeerAgentsSection(process.env.XMPP_GATEWAY_URL, descriptorInput.jid);
+    if (peerSection) {
+      instructions = `${instructions}\n\n${peerSection}`;
     }
   }
 

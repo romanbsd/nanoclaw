@@ -17,6 +17,7 @@ import {
   waitForUrl,
   type E2eStackConfig,
 } from './e2e-stack.js';
+import { resolveNode22Bin, resolveNode22Version } from './resolve-node22.js';
 import { readEnvFile } from '../../../src/env.js';
 import { getDefaultContainerImage } from '../../../src/install-slug.js';
 import { getOnecliApiHost } from '../../../setup/onecli.js';
@@ -148,6 +149,8 @@ async function stampUpgradeState(dataDir: string): Promise<void> {
 }
 
 export async function startOrchestratorE2eStack(): Promise<OrchestratorE2eStack> {
+  const nodeBin = resolveNode22Bin();
+  console.log(`[e2e-orch] using Node ${resolveNode22Version()} (${nodeBin})`);
   const config = e2eConfig();
   const nanoclawDataDir = path.join(__dirname, '.data', 'nanoclaw-e2e');
   const orchestratorPort = process.env.E2E_ORCHESTRATOR_PORT || '19300';
@@ -162,41 +165,56 @@ export async function startOrchestratorE2eStack(): Promise<OrchestratorE2eStack>
   process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
   if (!process.env.KEEP_E2E) {
+    console.log('[e2e-orch] tearing down previous compose stack...');
     await compose(['down', '-v']).catch(() => undefined);
   }
+  console.log('[e2e-orch] preparing data directories...');
   await fs.rm(config.gatewayDataDir, { recursive: true, force: true }).catch(() => undefined);
   await fs.rm(nanoclawDataDir, { recursive: true, force: true }).catch(() => undefined);
   await fs.mkdir(nanoclawDataDir, { recursive: true });
   await stampUpgradeState(nanoclawDataDir);
+  console.log(`[e2e-orch]   data dir: ${nanoclawDataDir}`);
 
-  console.log('[e2e-orch] starting Openfire...');
+  console.log('[e2e-orch] starting Openfire (docker compose up)...');
   await compose(['up', '-d', 'openfire']);
+  console.log(`[e2e-orch] waiting for Openfire admin at ${config.openfireUrl}...`);
   await waitForUrl(`${config.openfireUrl}/login.jsp`);
+  console.log(`[e2e-orch] waiting for XMPP port ${config.xmppPort}...`);
   await waitForTcp(Number(config.xmppPort));
+  console.log('[e2e-orch] waiting 15s for Openfire autosetup to settle...');
   await new Promise((r) => setTimeout(r, 15000));
+  console.log('[e2e-orch] bootstrapping Openfire (component secret, REST API, HTTP bind)...');
   await runOpenfireBootstrap(config);
+  console.log('[e2e-orch]   ok — Openfire ready');
 
-  console.log('[e2e-orch] starting gateway...');
+  console.log('[e2e-orch] starting XMPP gateway...');
   await freePort(Number(config.gatewayPort));
   await freePort(Number(config.bridgePort));
   const gateway = startGateway(config);
   try {
+    console.log('[e2e-orch] waiting for gateway component connection...');
     await Promise.race([
       gateway.online,
       new Promise<void>((_, reject) =>
         setTimeout(() => reject(new Error('gateway component did not connect in time')), 60_000),
       ),
     ]);
+    console.log('[e2e-orch]   ok — gateway component online');
   } catch (err) {
     await stopGateway(gateway.proc);
     throw err;
   }
 
+  console.log('[e2e-orch] resolving OneCLI gateway URL...');
   const onecliUrl = await resolveOnecliUrl();
+  console.log(`[e2e-orch] checking OneCLI at ${onecliUrl}...`);
   await assertOnecliReachable(onecliUrl);
+  console.log('[e2e-orch]   ok — OneCLI reachable');
   const onecliEnv = readEnvFile(['ONECLI_API_KEY']);
   const containerImage = process.env.CONTAINER_IMAGE || getDefaultContainerImage(REPO_ROOT);
+  console.log(`[e2e-orch] checking container image ${containerImage}...`);
   await assertContainerImage(containerImage);
+  console.log('[e2e-orch]   ok — container image present');
 
   const sharedEnv: NodeJS.ProcessEnv = {
     ...process.env,
@@ -217,18 +235,22 @@ export async function startOrchestratorE2eStack(): Promise<OrchestratorE2eStack>
 
   console.log('[e2e-orch] starting NanoClaw host...');
   await freePort(Number(config.bridgePort));
-  const hostProc = spawnLogged('host', 'node', [TSX, 'src/index.ts'], sharedEnv);
+  const hostProc = spawnLogged('host', nodeBin, [TSX, 'src/index.ts'], sharedEnv);
+  console.log('[e2e-orch] waiting for host CLI socket...');
   await waitForCliSocket(nanoclawDataDir);
+  console.log('[e2e-orch]   ok — host ready');
 
-  console.log('[e2e-orch] starting orchestrator...');
+  console.log('[e2e-orch] starting orchestrator HTTP server...');
   await freePort(Number(orchestratorPort));
   const orchestratorProc = spawnLogged(
     'orchestrator',
-    'node',
+    nodeBin,
     [TSX, 'packages/orchestrator/src/server.ts'],
     sharedEnv,
   );
+  console.log(`[e2e-orch] waiting for orchestrator health at ${orchestratorUrl}...`);
   await waitForHealth(orchestratorUrl);
+  console.log('[e2e-orch]   ok — orchestrator ready');
 
   return {
     config,
@@ -242,10 +264,14 @@ export async function startOrchestratorE2eStack(): Promise<OrchestratorE2eStack>
 }
 
 export async function stopOrchestratorE2eStack(stack: OrchestratorE2eStack): Promise<void> {
+  console.log('[e2e-orch] stopping orchestrator...');
   await stopChild(stack.orchestratorProc);
+  console.log('[e2e-orch] stopping NanoClaw host...');
   await stopChild(stack.hostProc);
+  console.log('[e2e-orch] stopping XMPP gateway...');
   await stopGateway(stack.gatewayProc);
   if (!process.env.KEEP_E2E) {
+    console.log('[e2e-orch] stopping Openfire (docker compose down)...');
     await compose(['down', '-v']).catch(() => undefined);
   }
 }

@@ -124,6 +124,12 @@ function buildDestinationsSection(mode: SessionMode): string {
   lines.push(
     'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
   );
+  if (process.env.XMPP_AGENT_JID) {
+    lines.push('');
+    lines.push(
+      '**Destinations name human chat peers only.** Other NanoClaw agents on this gateway appear under **Peer agents** (below) and via `xmpp.discover_agents` — use `xmpp.send_message` with their JID to reach them.',
+    );
+  }
   lines.push('');
   lines.push(
     'When replying to an incoming message, default to addressing the destination it came `from` (every inbound `<message>` tag carries a `from="name"` attribute). Pick a different destination when the request asks for it (e.g., "tell Laura that…").',

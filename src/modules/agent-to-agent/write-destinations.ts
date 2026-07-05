@@ -27,6 +27,10 @@ export function writeDestinations(agentGroupId: string, sessionId: string): void
     if (row.target_type === 'channel') {
       const mg = getMessagingGroup(row.target_id);
       if (!mg) continue;
+      const ag = getAgentGroup(agentGroupId);
+      if (mg.channel_type === 'xmpp' && ag?.xmpp_jid && mg.platform_id === ag.xmpp_jid) {
+        continue;
+      }
       resolved.push({
         name: row.local_name,
         display_name: mg.name ?? row.local_name,

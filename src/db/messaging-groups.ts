@@ -1,4 +1,5 @@
 import type { MessagingGroup, MessagingGroupAgent } from '../types.js';
+import { getAgentGroup } from './agent-groups.js';
 // Transitional tier violation: core imports from optional agent-to-agent module.
 // `createMessagingGroupAgent` auto-creates a destination row on wiring — the
 // two concerns are currently bundled. When agent-to-agent isn't installed,
@@ -216,11 +217,15 @@ export function ensureAgentDestinationForWiring(mga: MessagingGroupAgent): void 
   // delivery is also skipped (same guard), so channel sends still work.
   if (!hasTable(getDb(), 'agent_destinations')) return;
 
-  const existing = getDestinationByTarget(mga.agent_group_id, 'channel', mga.messaging_group_id);
-  if (existing) return;
-
   const mg = getMessagingGroup(mga.messaging_group_id);
   if (!mg) return;
+
+  const ag = getAgentGroup(mga.agent_group_id);
+  const isAgentInbox = mg.channel_type === 'xmpp' && !!ag?.xmpp_jid && mg.platform_id === ag.xmpp_jid;
+  if (isAgentInbox) return;
+
+  const existing = getDestinationByTarget(mga.agent_group_id, 'channel', mga.messaging_group_id);
+  if (existing) return;
 
   const base = normalizeName(mg.name || `${mg.channel_type}-${mga.messaging_group_id.slice(0, 8)}`);
   let localName = base;

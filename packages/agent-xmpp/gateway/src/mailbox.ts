@@ -92,7 +92,9 @@ export class Mailbox {
     if (!row) return null;
     try {
       return JSON.parse(row.payload) as AgentMessage;
-    } catch {
+    // eslint-disable-next-line no-catch-all/no-catch-all -- corrupt row: log and treat as missing
+    } catch (err) {
+      console.error('[xmpp-gateway] mailbox payload parse failed:', messageId, err);
       return null;
     }
   }

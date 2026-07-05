@@ -29,11 +29,10 @@ import {
   getMessagingGroupByPlatform,
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
-import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
+import { agentMessageFromNanoclawContent, isXmppAgentEnvelope } from '@agent-xmpp/protocol';
+import { getAgentInboundTransport } from './agent-inbound/index.js';
 import { log } from './log.js';
-import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
-import { wakeContainer } from './container-runner.js';
-import { getSession } from './db/sessions.js';
+import { resolveSession, writeOutboundDirect } from './session-manager.js';
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
 
@@ -165,13 +164,27 @@ async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
   const recipientJid = event.instance!;
   const agentGroup = getAgentGroupByXmppJid(recipientJid);
   if (!agentGroup) {
-    log.warn('XMPP inbound for unknown agent JID', { recipientJid, from: event.platformId });
+    const agentMsg = agentMessageFromNanoclawContent(event.message.content);
+    if (agentMsg && isXmppAgentEnvelope(agentMsg)) {
+      log.warn('XMPP inbound for unknown agent JID', { recipientJid, from: event.platformId });
+    } else {
+      log.debug('XMPP inbound for unknown agent JID from human sender', {
+        recipientJid,
+        from: event.platformId,
+      });
+    }
     return true;
   }
 
   const inbox = getMessagingGroupByPlatform('xmpp', recipientJid, 'xmpp');
   if (!inbox) {
     log.warn('XMPP inbox messaging group missing for agent', { recipientJid, agentGroupId: agentGroup.id });
+    return true;
+  }
+
+  const bodyText = safeParseContent(event.message.content).text ?? '';
+  if (!bodyText.trim()) {
+    log.debug('XMPP inbound empty body skipped', { recipientJid, from: event.platformId });
     return true;
   }
 
@@ -184,6 +197,8 @@ async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
 
   const adapter = getChannelAdapter('xmpp');
   const userId: string | null = senderResolver ? senderResolver(event) : null;
+  const threadsEnabled = adapter?.supportsThreads === true;
+  const effectiveThreadId = threadsEnabled ? event.threadId : null;
 
   if (accessGate) {
     const access = accessGate(event, userId, inbox, agentGroup.id);
@@ -207,7 +222,8 @@ async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
     inbox,
     { ...event, message: { ...event.message, isMention: true } },
     userId,
-    adapter?.supportsThreads === true,
+    threadsEnabled,
+    effectiveThreadId,
     true,
   );
   return true;
@@ -567,15 +583,25 @@ async function deliverToAgent(
     }
   }
 
-  writeSessionMessage(session.agent_group_id, session.id, {
-    id: messageIdForAgent(event.message.id, agent.agent_group_id),
-    kind: event.message.kind,
-    timestamp: event.message.timestamp,
-    platformId: deliveryAddr.platformId,
-    channelType: deliveryAddr.channelType,
-    threadId: deliveryAddr.threadId,
-    content: event.message.content,
-    trigger: wake ? 1 : 0,
+  await getAgentInboundTransport().deliver({
+    session,
+    message: {
+      id: messageIdForAgent(event.message.id, agent.agent_group_id),
+      kind: event.message.kind,
+      timestamp: event.message.timestamp,
+      platformId: deliveryAddr.platformId,
+      channelType: deliveryAddr.channelType,
+      threadId: deliveryAddr.threadId,
+      content: event.message.content,
+      trigger: wake ? 1 : 0,
+    },
+    wake,
+    typing: {
+      channelType: event.channelType,
+      platformId: event.platformId,
+      threadId: event.threadId,
+      adapterInstance: mg.instance ?? event.channelType,
+    },
   });
 
   log.info('Message routed', {
@@ -588,28 +614,6 @@ async function deliverToAgent(
     created,
     agentGroupName: agentGroup.name,
   });
-
-  if (wake) {
-    // Typing indicator + wake are only for the engaged branch; accumulated
-    // messages sit silently until a real trigger fires.
-    // Typing fires via the adapter instance that owns this chat's row.
-    startTypingRefresh(
-      session.id,
-      session.agent_group_id,
-      event.channelType,
-      event.platformId,
-      effectiveThreadId,
-      mg.instance,
-    );
-    const freshSession = getSession(session.id);
-    if (freshSession) {
-      const woke = await wakeContainer(freshSession);
-      // wakeContainer never throws — it returns false on transient spawn
-      // failure (host-sweep retries). Stop the typing indicator we just
-      // started so it doesn't leak; the inbound row stays pending.
-      if (!woke) stopTypingRefresh(freshSession.id);
-    }
-  }
 }
 
 /**

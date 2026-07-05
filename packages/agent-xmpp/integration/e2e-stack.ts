@@ -8,6 +8,7 @@ import type http from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 import { resetMockBridge, startMockBridge } from './mock-bridge.js';
+import { resolveNode22Bin } from './resolve-node22.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.join(__dirname, '../../..');
@@ -119,13 +120,15 @@ export function startGateway(config: E2eStackConfig): { proc: ChildProcess; onli
     XMPP_AGENT_DOMAIN: config.xmppDomain,
     XMPP_COMPONENT_SERVICE: `xmpp://127.0.0.1:${config.componentPort}`,
     XMPP_COMPONENT_SECRET: 'component-secret',
+    XMPP_C2S_SERVICE: config.xmppService,
     XMPP_DEFAULT_AGENT_JID: config.agentJid,
     XMPP_GATEWAY_PORT: config.gatewayPort,
     XMPP_BRIDGE_WEBHOOK_URL: `http://127.0.0.1:${config.bridgePort}/internal/xmpp/inbound`,
     XMPP_BRIDGE_WEBHOOK_SECRET: 'dev-secret',
     XMPP_GATEWAY_DATA_DIR: config.gatewayDataDir,
   };
-  const child = spawn('node', [GATEWAY_ENTRY], { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const nodeBin = resolveNode22Bin();
+  const child = spawn(nodeBin, [GATEWAY_ENTRY], { cwd: REPO_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout?.on('data', (buf) => process.stdout.write(`[gateway] ${buf}`));
   child.stderr?.on('data', (buf) => process.stderr.write(`[gateway] ${buf}`));
 
@@ -170,7 +173,7 @@ export async function stopGateway(child: ChildProcess | null): Promise<void> {
 
 export async function runOpenfireBootstrap(config: Pick<E2eStackConfig, 'openfireUrl' | 'xmppDomain'>): Promise<void> {
   console.log('[e2e] bootstrapping Openfire...');
-  await run('node', [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
+  await run(resolveNode22Bin(), [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
     env: {
       ...process.env,
       OPENFIRE_URL: config.openfireUrl,

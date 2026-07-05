@@ -32,6 +32,8 @@ import { defaultPubsubService, buildPublish } from './xep-plugins/pubsub.js';
 import { buildAckStanza } from './xep-plugins/receipts.js';
 import type { SendStanzaFn } from './stanza-router.js';
 import { deliverLocalAgentMessage } from './agent-local-delivery.js';
+import { sendStanzaForAgent } from './agent-send.js';
+import type { AgentIngress } from './ingress/index.js';
 import { buildPublishAgentCard } from './xep-plugins/a2a-binding.js';
 import { xml } from './xmpp-component.js';
 
@@ -40,13 +42,14 @@ export interface HttpServerDeps {
   mailbox: Mailbox;
   send: SendStanzaFn;
   agentRegistry: AgentRegistry;
+  c2sIngress: AgentIngress;
   pendingIq: Map<string, { resolve: (stanza: unknown) => void; reject: (e: Error) => void }>;
   mamAwaiter: MamQueryAwaiter;
 }
 
 export async function createHttpServer(deps: HttpServerDeps) {
   const app = Fastify({ logger: true });
-  const { config, mailbox, send, agentRegistry, pendingIq, mamAwaiter } = deps;
+  const { config, mailbox, send, agentRegistry, c2sIngress, pendingIq, mamAwaiter } = deps;
 
   app.get('/health', async () => ({ ok: true, gatewayId: config.gatewayId }));
 
@@ -65,7 +68,9 @@ export async function createHttpServer(deps: HttpServerDeps) {
       body: body.content,
       threadId: body.threadId ?? undefined,
       replyTo: body.inReplyTo ?? undefined,
-    }).catch(() => undefined);
+    }).catch((err) => {
+      console.error('[xmpp-gateway] agent loopback delivery failed:', err);
+    });
     const res: OutboundDeliverResponse = { messageId };
     return reply.send(res);
   });
@@ -113,26 +118,30 @@ export async function createHttpServer(deps: HttpServerDeps) {
       body: req.body.body,
       threadId: req.body.threadId,
       replyTo: req.body.replyTo,
-    }).catch(() => undefined);
+    }).catch((err) => {
+      console.error('[xmpp-gateway] agent loopback delivery failed:', err);
+    });
     return reply.send({ messageId: stanza.attrs.id });
   });
 
   app.post<{ Body: XmppJoinRoomInput & { from?: string } }>('/v1/tools/xmpp.join_room', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
-    await send(buildJoinPresence(req.body, fromJid));
+    const stanza = buildJoinPresence(req.body, fromJid);
+    await sendStanzaForAgent(fromJid, stanza, c2sIngress, send);
     return reply.send({ ok: true });
   });
 
   app.post<{ Body: XmppLeaveRoomInput & { from?: string } }>('/v1/tools/xmpp.leave_room', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
-    await send(buildLeavePresence(req.body, fromJid));
+    const stanza = buildLeavePresence(req.body, fromJid, req.body.nickname);
+    await sendStanzaForAgent(fromJid, stanza, c2sIngress, send);
     return reply.send({ ok: true });
   });
 
   app.post<{ Body: XmppSendRoomMessageInput & { from?: string } }>('/v1/tools/xmpp.send_room_message', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildRoomMessage(req.body, fromJid);
-    await send(stanza);
+    await sendStanzaForAgent(fromJid, stanza, c2sIngress, send);
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -247,12 +256,27 @@ export async function createHttpServer(deps: HttpServerDeps) {
     return reply.send({ ok: true, jid: descriptor.jid, agentCard });
   });
 
+  app.post<{ Body: { jid: string; password: string } }>('/v1/agents/register_inbox', async (req, reply) => {
+    const { jid, password } = req.body ?? {};
+    if (!jid || typeof jid !== 'string' || !password || typeof password !== 'string') {
+      return reply.status(400).send({ error: 'jid and password required' });
+    }
+    try {
+      await c2sIngress.register(jid, password);
+      return reply.send({ ok: true, jid: jid.split('/')[0], ingress: c2sIngress.kind });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.status(400).send({ error: message });
+    }
+  });
+
   app.post<{ Body: { jid: string } }>('/v1/agents/unregister', async (req, reply) => {
     const jid = req.body?.jid;
     if (!jid || typeof jid !== 'string') {
       return reply.status(400).send({ error: 'jid required' });
     }
     agentRegistry.unregister(jid);
+    await c2sIngress.unregister(jid);
     await send(xml('presence', { from: jid, type: 'unavailable' }));
     return reply.send({ ok: true, jid });
   });

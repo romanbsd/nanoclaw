@@ -1,9 +1,9 @@
 import type { AgentMessage, BridgeInboundPayload } from '@agent-xmpp/protocol';
 import { agentMessageText } from '@agent-xmpp/protocol';
 
-import { pushToBridge } from './bridge-client.js';
 import type { GatewayConfig } from './config.js';
 import type { Mailbox } from './mailbox.js';
+import { getRuntimeInboundPort } from './runtime-inbound/index.js';
 import { buildInboundEnvelope } from './xep-plugins/message.js';
 import { mucRoomFromStanza } from './xep-plugins/muc.js';
 import { isMentionForAgent, shouldDeliverInbound } from './xep-plugins/routing.js';
@@ -72,6 +72,7 @@ export async function pushInboundToBridge(
   mailbox: Mailbox,
   ctx: InboundDeliveryContext,
 ): Promise<void> {
-  await pushToBridge(config, buildBridgePayload(config, ctx));
+  const port = getRuntimeInboundPort(config);
+  await port.deliver(buildBridgePayload(config, ctx));
   mailbox.markDelivered(ctx.agentMsg.id);
 }

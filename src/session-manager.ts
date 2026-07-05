@@ -19,6 +19,7 @@ import { isSafeAttachmentName } from './attachment-safety.js';
 import type { OutboundFile } from './channels/adapter.js';
 import { DATA_DIR } from './config.js';
 import { ensureContainedInboxDir, isPathInside } from './inbox-safety.js';
+import { getAgentGroup } from './db/agent-groups.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
@@ -181,9 +182,12 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
   let platformId: string | null = null;
   if (session.messaging_group_id) {
     const mg = getMessagingGroup(session.messaging_group_id);
+    const ag = getAgentGroup(agentGroupId);
     if (mg) {
       channelType = mg.channel_type;
-      platformId = mg.platform_id;
+      // XMPP agent inbox: messaging_group.platform_id is the agent JID, not the human peer.
+      const isAgentInbox = mg.channel_type === 'xmpp' && !!ag?.xmpp_jid && mg.platform_id === ag.xmpp_jid;
+      platformId = isAgentInbox ? null : mg.platform_id;
     }
   }
 
@@ -198,6 +202,42 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
     db.close();
   }
   log.debug('Session routing written', { sessionId, channelType, platformId, threadId: session.thread_id });
+}
+
+/** Whether this session is an orchestrator-provisioned XMPP agent inbox (one mg per agent JID). */
+export function isXmppAgentInboxSession(agentGroupId: string, messagingGroupId: string | null): boolean {
+  if (!messagingGroupId) return false;
+  const ag = getAgentGroup(agentGroupId);
+  const mg = getMessagingGroup(messagingGroupId);
+  if (!ag?.xmpp_jid || !mg) return false;
+  return mg.channel_type === 'xmpp' && mg.platform_id === ag.xmpp_jid;
+}
+
+/** Stamp the reply peer for XMPP agent inbox sessions after each inbound DM. */
+export function writeSessionReplyRouting(
+  agentGroupId: string,
+  sessionId: string,
+  routing: { channelType: string; platformId: string; threadId: string | null },
+): void {
+  const dbPath = inboundDbPath(agentGroupId, sessionId);
+  if (!fs.existsSync(dbPath)) return;
+
+  const db = openInboundDb(agentGroupId, sessionId);
+  try {
+    upsertSessionRouting(db, {
+      channel_type: routing.channelType,
+      platform_id: routing.platformId,
+      thread_id: routing.threadId,
+    });
+  } finally {
+    db.close();
+  }
+  log.debug('Session reply routing written', {
+    sessionId,
+    channelType: routing.channelType,
+    platformId: routing.platformId,
+    threadId: routing.threadId,
+  });
 }
 
 /**

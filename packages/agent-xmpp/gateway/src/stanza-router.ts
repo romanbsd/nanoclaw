@@ -10,7 +10,7 @@ import {
   resolveTargetAgentJid,
   stanzaToAgentMessage,
 } from './xep-plugins/message.js';
-import { buildReceivedReceipt } from './xep-plugins/receipts.js';
+import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
 
 export type SendStanzaFn = (stanza: Element) => Promise<void>;
 
@@ -32,10 +32,16 @@ export class StanzaRouter {
       return;
     }
 
+    const from = stanza.attrs.from as string;
+    const fromBare = from.split('/')[0];
+    const agentBare = agentJid.split('/')[0];
+    // C2S inbox receives agent self-sent stanzas (outbound loopback) — drop them.
+    if (fromBare && agentBare && fromBare === agentBare) return;
+    if (isAckOrReceiptStanza(stanza)) return;
+
     const agentMsg = stanzaToAgentMessage(stanza, this.config.agentDomain);
     if (!agentMsg) return;
 
-    const from = stanza.attrs.from as string;
     const type = (stanza.attrs.type as string) || 'chat';
     const agentNick = agentJid.split('@')[0];
     const bodyText = typeof agentMsg.body === 'string' ? agentMsg.body : JSON.stringify(agentMsg.body);
@@ -65,7 +71,9 @@ export class StanzaRouter {
     await pushInboundToBridge(this.config, this.mailbox, ctx);
 
     if (from) {
-      await this.send(buildReceivedReceipt(from, agentJid, stanzaId)).catch(() => undefined);
+      await this.send(buildReceivedReceipt(from, agentJid, stanzaId)).catch((err) => {
+        console.error('[xmpp-gateway] received receipt send failed:', err);
+      });
     }
   }
 

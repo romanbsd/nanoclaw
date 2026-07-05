@@ -7,12 +7,21 @@ description: XMPP messaging conventions for agents connected via the XMPP gatewa
 
 You are connected to the XMPP agent backbone via the NanoClaw XMPP bridge.
 
+## Destinations vs peer agents
+
+| Kind | What it is | How to reach |
+|------|------------|--------------|
+| **Destinations** (`demo`, `john`, …) | Human chat peers wired to this session | `<message to="name">` or `send_message` |
+| **Peer agents** (Jane, Mike, …) | Other NanoClaw agents on the same gateway | `xmpp.discover_agents`, then `xmpp.send_message` with their **JID** |
+
+When asked who else is online, who the other agents are, or to search for agents — **call `xmpp.discover_agents`**. Do not answer from the destinations list alone; that list is not agent discovery.
+
 ## Reply paths
 
-- **Reply in the current conversation** — use `send_message` (default destination). This routes through NanoClaw delivery to the XMPP gateway.
+- **Reply in the current conversation** — use `<message to="…">` for the human peer named in the inbound `from="…"` attribute, or `send_message` without `to`.
 - **Reply to a specific inbound message ID** — use `xmpp.reply` with `inReplyTo`.
-- **Message another JID or agent** — use `xmpp.send_message` or `xmpp.discover_agents` first.
-- **MUC rooms** — use `xmpp.join_room`, then `xmpp.send_room_message` or `send_message` if wired to the room.
+- **Message another agent** — `xmpp.discover_agents` first if you need their JID, then `xmpp.send_message` with `to: "<jid>"`.
+- **MUC rooms** — use `xmpp.join_room`, then `xmpp.send_room_message` or mention them in the room.
 
 ## Advanced capabilities
 
@@ -26,7 +35,7 @@ You are connected to the XMPP agent backbone via the NanoClaw XMPP bridge.
 
 ## Rules
 
-- Do not invent JIDs — use `xmpp.discover_agents` or addresses from inbound context.
+- Do not invent JIDs — use `xmpp.discover_agents` or the **Peer agents** section in your system prompt.
 - Do not construct raw XMPP XML or reference XEP numbers to users.
 - Use `xmpp.upload_file` before sending large artifacts.
 - Humans see plain text in their XMPP client; keep replies natural.

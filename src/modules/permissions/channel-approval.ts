@@ -206,8 +206,13 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
           updateMessagingGroup(originMg.id, { name });
           originMg.name = name;
         }
-      } catch {
-        /* non-critical */
+        // eslint-disable-next-line no-catch-all/no-catch-all -- channel name lookup is non-critical
+      } catch (err) {
+        log.warn('Channel registration: resolveChannelName failed', {
+          messagingGroupId: originMg.id,
+          platformId: originMg.platform_id,
+          err,
+        });
       }
     }
   }

@@ -104,17 +104,28 @@ export interface RoutingContext {
   taskRun: boolean;
 }
 
+function hasChatText(row: MessageInRow): boolean {
+  if (row.kind !== 'chat' && row.kind !== 'chat-sdk') return false;
+  try {
+    const parsed = JSON.parse(row.content) as { text?: string };
+    return typeof parsed.text === 'string' && parsed.text.trim().length > 0;
+  } catch {
+    return row.content.trim().length > 0;
+  }
+}
+
 /**
  * Extract routing context from a batch of messages.
- * Uses the first message's routing fields.
+ * Prefers the first chat row with non-empty text so receipt/ack rows
+ * (empty body, same platform_id as agent) do not hijack reply routing.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const first = messages[0];
+  const routed = messages.find((m) => m.platform_id && hasChatText(m)) ?? messages[0];
   return {
-    platformId: first?.platform_id ?? null,
-    channelType: first?.channel_type ?? null,
-    threadId: first?.thread_id ?? null,
-    inReplyTo: first?.id ?? null,
+    platformId: routed?.platform_id ?? null,
+    channelType: routed?.channel_type ?? null,
+    threadId: routed?.thread_id ?? null,
+    inReplyTo: routed?.id ?? null,
     taskRun: messages.length > 0 && messages.every((m) => m.kind === 'task'),
   };
 }

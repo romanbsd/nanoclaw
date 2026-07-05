@@ -67,6 +67,7 @@ export interface XmppJoinRoomInput {
 
 export interface XmppLeaveRoomInput {
   roomJid: string;
+  nickname?: string;
   reason?: string;
 }
 

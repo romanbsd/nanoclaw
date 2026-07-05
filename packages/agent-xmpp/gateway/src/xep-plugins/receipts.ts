@@ -5,6 +5,18 @@ import { xml, type Element } from '@xmpp/xml';
 const RECEIPTS_NS = 'urn:xmpp:receipts';
 const MARKERS_NS = 'urn:xmpp:chat-markers:0';
 
+/** True for XEP-0184/0333 ack stanzas with no conversational body. */
+export function isAckOrReceiptStanza(stanza: Element): boolean {
+  if (stanza.name !== 'message') return false;
+  const body = stanza.getChildText('body');
+  if (body?.trim()) return false;
+  if (stanza.getChild('received', RECEIPTS_NS)) return true;
+  if (stanza.getChild('displayed', MARKERS_NS)) return true;
+  if (stanza.getChild('acknowledged', MARKERS_NS)) return true;
+  if (stanza.getChild('request', RECEIPTS_NS)) return true;
+  return false;
+}
+
 export function buildReceivedReceipt(to: string, from: string, messageId: string): Element {
   return xml(
     'message',

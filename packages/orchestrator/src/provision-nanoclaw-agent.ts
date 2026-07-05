@@ -94,6 +94,46 @@ function containerGatewayUrl(gatewayUrl: string): string {
   return gatewayUrl;
 }
 
+async function registerAgentIngress(gatewayUrl: string, jid: string, password: string): Promise<void> {
+  const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/v1/agents/register_inbox`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jid, password }),
+  });
+  if (!res.ok) {
+    throw new Error(`register agent ingress failed for ${jid}: ${res.status} ${await res.text()}`);
+  }
+}
+
+/** Seed gateway discovery before the container publishes its full runtime descriptor. */
+async function publishBootstrapDescriptor(
+  gatewayUrl: string,
+  jid: string,
+  tenantId: string,
+  provider: string,
+  model: string,
+): Promise<void> {
+  const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/v1/agents/publish_descriptor`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jid,
+      tenantId,
+      tools: [{ name: 'send_message', description: 'Send a message', inputSchema: { type: 'object' } }],
+      model,
+      provider,
+      softwareVersion: '2.0.0',
+      health: 'healthy',
+      availability: 'idle',
+      supportedProtocols: ['xmpp', 'mcp'],
+      publishedAt: new Date().toISOString(),
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`publish bootstrap descriptor failed for ${jid}: ${res.status} ${await res.text()}`);
+  }
+}
+
 function buildMcpServers(
   specs: McpServerSpec[] | undefined,
   gatewayUrl: string,
@@ -222,6 +262,15 @@ export async function provisionNanoclawAgent(
     created_at: now,
   };
   createOrchestratorAgent(orchRow);
+
+  await registerAgentIngress(gatewayUrl, identity.jid, identity.password);
+  await publishBootstrapDescriptor(
+    gatewayUrl,
+    identity.jid,
+    request.tenantId,
+    provider,
+    request.model || (provider === 'mock' ? 'mock' : 'default'),
+  );
 
   return {
     orchestratorId,
