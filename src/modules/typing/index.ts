@@ -46,7 +46,13 @@ const HEARTBEAT_FRESH_MS = 6000;
 const POST_DELIVERY_PAUSE_MS = 10000;
 
 interface TypingAdapter {
-  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
+  setTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    agentGroupId?: string,
+  ): Promise<void>;
 }
 
 interface TypingTarget {
@@ -80,9 +86,10 @@ async function triggerTyping(
   platformId: string,
   threadId: string | null,
   instance?: string,
+  agentGroupId?: string,
 ): Promise<void> {
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, instance);
+    await adapter?.setTyping?.(channelType, platformId, threadId, instance, agentGroupId);
     // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
   } catch (err) {
     log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
@@ -114,7 +121,7 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(channelType, platformId, threadId, instance).catch((err) => {
+    triggerTyping(channelType, platformId, threadId, instance, agentGroupId).catch((err) => {
       log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
     });
     existing.startedAt = Date.now();
@@ -133,7 +140,7 @@ export function startTypingRefresh(
   }
 
   // Immediate tick + periodic refresh.
-  triggerTyping(channelType, platformId, threadId, instance).catch((err) => {
+  triggerTyping(channelType, platformId, threadId, instance, agentGroupId).catch((err) => {
     log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
   });
   const startedAt = Date.now();
@@ -148,14 +155,16 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance).catch((err) => {
-        log.debug('Typing indicator failed (best-effort)', {
-          channelType: entry.channelType,
-          platformId: entry.platformId,
-          threadId: entry.threadId,
-          err,
-        });
-      });
+      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.agentGroupId).catch(
+        (err) => {
+          log.debug('Typing indicator failed (best-effort)', {
+            channelType: entry.channelType,
+            platformId: entry.platformId,
+            threadId: entry.threadId,
+            err,
+          });
+        },
+      );
       return;
     }
 

@@ -4,6 +4,7 @@
  * Channels self-register on import. The host calls initChannelAdapters() at startup
  * to instantiate and set up all registered adapters.
  */
+import { getAgentGroup } from '../db/agent-groups.js';
 import type { ChannelAdapter, ChannelDefaults, ChannelRegistration, ChannelSetup, OutboundFile } from './adapter.js';
 import type { ChannelDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
@@ -116,9 +117,12 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
       platformId: string,
       threadId: string | null,
       instance?: string,
+      agentGroupId?: string,
     ): Promise<void> {
       const adapter = getChannelAdapterExact(instance ?? channelType);
-      await adapter?.setTyping?.(platformId, threadId);
+      const fromJid =
+        channelType === 'xmpp' && agentGroupId ? (getAgentGroup(agentGroupId)?.xmpp_jid ?? undefined) : undefined;
+      await adapter?.setTyping?.(platformId, threadId, fromJid);
     },
   };
 }

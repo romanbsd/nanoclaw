@@ -2,8 +2,14 @@ import type { Element } from '@xmpp/xml';
 
 import type { AgentMessage } from '@agent-xmpp/protocol';
 
+import { sendComposingForAgent } from './agent-send.js';
 import type { GatewayConfig } from './config.js';
-import { pushInboundToBridge, shouldAcceptStanza, type InboundDeliveryContext } from './delivery.js';
+import {
+  pushInboundToBridge,
+  resolveInboundChatTargets,
+  shouldAcceptStanza,
+  type InboundDeliveryContext,
+} from './delivery.js';
 import { Mailbox } from './mailbox.js';
 import {
   isAgentJid,
@@ -13,12 +19,13 @@ import {
 import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
 
 export type SendStanzaFn = (stanza: Element) => Promise<void>;
+export type SendForAgentFn = (agentJid: string, stanza: Element) => Promise<void>;
 
 export class StanzaRouter {
   constructor(
     private config: GatewayConfig,
     private mailbox: Mailbox,
-    private send: SendStanzaFn,
+    private sendForAgent: SendForAgentFn,
   ) {}
 
   async handleIncoming(stanza: Element): Promise<void> {
@@ -68,10 +75,18 @@ export class StanzaRouter {
       redelivered: isDuplicate && redelivered,
     };
 
+    void sendComposingForAgent(
+      this.sendForAgent,
+      agentJid,
+      resolveInboundChatTargets(from, type, agentMsg),
+    ).catch((err) => {
+      console.error('[xmpp-gateway] composing notification send failed:', err);
+    });
+
     await pushInboundToBridge(this.config, this.mailbox, ctx);
 
     if (from) {
-      await this.send(buildReceivedReceipt(from, agentJid, stanzaId)).catch((err) => {
+      await this.sendForAgent(agentJid, buildReceivedReceipt(from, agentJid, stanzaId)).catch((err) => {
         console.error('[xmpp-gateway] received receipt send failed:', err);
       });
     }

@@ -6,6 +6,7 @@ import { loadConfig } from './config.js';
 import { C2sAgentIngress } from './ingress/index.js';
 import { createHttpServer } from './http-server.js';
 import { Mailbox } from './mailbox.js';
+import { createAgentSender } from './agent-send.js';
 import { StanzaRouter } from './stanza-router.js';
 import { handleBindingIq } from './xep-plugins/a2a-binding.js';
 import { AgentRegistry, buildGatewayDiscoResponse } from './xep-plugins/discovery.js';
@@ -34,8 +35,10 @@ async function main(): Promise<void> {
     }
     return null;
   });
-  const router = new StanzaRouter(config, mailbox, (stanza) => session.send(stanza));
+  let router!: StanzaRouter;
   const c2sIngress = new C2sAgentIngress(config, (stanza) => router.handleIncoming(stanza));
+  const sendForAgent = createAgentSender(c2sIngress, (s) => session.send(s));
+  router = new StanzaRouter(config, mailbox, sendForAgent);
 
   session.onStanza((stanza) => {
     if (mamAwaiter.handleStanza(stanza, config.agentDomain)) return;

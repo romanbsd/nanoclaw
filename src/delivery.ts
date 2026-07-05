@@ -72,7 +72,7 @@ export interface ChannelDeliveryAdapter {
     /** XMPP outbound from JID (per-agent). */
     fromJid?: string,
   ): Promise<string | undefined>;
-  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
+  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string, agentGroupId?: string): Promise<void>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;

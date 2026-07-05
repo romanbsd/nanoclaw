@@ -32,7 +32,8 @@ import { defaultPubsubService, buildPublish } from './xep-plugins/pubsub.js';
 import { buildAckStanza } from './xep-plugins/receipts.js';
 import type { SendStanzaFn } from './stanza-router.js';
 import { deliverLocalAgentMessage } from './agent-local-delivery.js';
-import { sendStanzaForAgent } from './agent-send.js';
+import { createAgentSender, sendComposingForAgent, sendStanzaForAgent } from './agent-send.js';
+import { isMucJid } from './xep-plugins/muc.js';
 import type { AgentIngress } from './ingress/index.js';
 import { buildPublishAgentCard } from './xep-plugins/a2a-binding.js';
 import { xml } from './xmpp-component.js';
@@ -52,6 +53,23 @@ export async function createHttpServer(deps: HttpServerDeps) {
   const { config, mailbox, send, agentRegistry, c2sIngress, pendingIq, mamAwaiter } = deps;
 
   app.get('/health', async () => ({ ok: true, gatewayId: config.gatewayId }));
+
+  app.post<{ Body: { from?: string; to: string; threadId?: string | null } }>(
+    '/v1/outbound/typing',
+    async (req, reply) => {
+      const fromJid = req.body.from || config.defaultAgentJid;
+      const to = req.body.to;
+      if (!to) {
+        return reply.status(400).send({ error: 'to required' });
+      }
+      await sendComposingForAgent(createAgentSender(c2sIngress, send), fromJid, {
+        to,
+        threadId: req.body.threadId ?? null,
+        groupchat: isMucJid(to),
+      });
+      return reply.send({ ok: true });
+    },
+  );
 
   app.post<{ Body: OutboundDeliverRequest & { from?: string } }>('/v1/outbound/deliver', async (req, reply) => {
     const body = req.body;

@@ -2,11 +2,14 @@
 
 import { xml, type Element } from '@xmpp/xml';
 
+import { isChatStateStanza } from './chatstate.js';
+
 const RECEIPTS_NS = 'urn:xmpp:receipts';
 const MARKERS_NS = 'urn:xmpp:chat-markers:0';
 
-/** True for XEP-0184/0333 ack stanzas with no conversational body. */
+/** True for XEP-0085 chat states and XEP-0184/0333 ack stanzas with no conversational body. */
 export function isAckOrReceiptStanza(stanza: Element): boolean {
+  if (isChatStateStanza(stanza)) return true;
   if (stanza.name !== 'message') return false;
   const body = stanza.getChildText('body');
   if (body?.trim()) return false;

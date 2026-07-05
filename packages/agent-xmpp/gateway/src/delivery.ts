@@ -24,13 +24,36 @@ export function shouldAcceptStanza(stanzaType: string, from: string, bodyText: s
   return shouldDeliverInbound(stanzaType, isGroup, isMention);
 }
 
+export interface InboundChatTargets {
+  /** Reply/typing destination: MUC room JID or bare sender JID. */
+  to: string;
+  threadId: string | null;
+  groupchat: boolean;
+  /** Same as `to` — host router session key. */
+  platformId: string;
+  /** Same as `groupchat`. */
+  isGroup: boolean;
+}
+
+/** Resolve where replies and typing notifications for an inbound stanza should go. */
+export function resolveInboundChatTargets(
+  from: string,
+  stanzaType: string,
+  agentMsg: Pick<AgentMessage, 'from' | 'threadId'>,
+): InboundChatTargets {
+  const room = mucRoomFromStanza(from);
+  const isGroup = stanzaType === 'groupchat' || !!room;
+  const to = isGroup && room ? room : agentMsg.from.split('/')[0];
+  const threadId = agentMsg.threadId || (isGroup ? room || null : null);
+  return { to, threadId, groupchat: isGroup, platformId: to, isGroup };
+}
+
 export function buildBridgePayload(
   config: GatewayConfig,
   ctx: InboundDeliveryContext,
 ): BridgeInboundPayload {
   const { agentMsg, agentJid, deliveryId, stanzaType, from, redelivered } = ctx;
-  const room = mucRoomFromStanza(from);
-  const isGroup = stanzaType === 'groupchat' || !!room;
+  const { platformId, threadId, isGroup } = resolveInboundChatTargets(from, stanzaType, agentMsg);
   const bodyText = agentMessageText(agentMsg);
   const agentNick = agentJid.split('@')[0];
   const isMention = isMentionForAgent(stanzaType, bodyText, agentNick);
@@ -46,10 +69,6 @@ export function buildBridgePayload(
     },
     redelivered,
   );
-
-  // Host router keys sessions by platformId: MUC room JID for groupchat, bare sender JID for DM.
-  const platformId = isGroup && room ? room : agentMsg.from.split('/')[0];
-  const threadId = agentMsg.threadId || (isGroup ? room || null : null);
 
   return {
     platformId,

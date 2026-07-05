@@ -40,6 +40,27 @@ function webhookPort(): number {
   return Number(raw);
 }
 
+async function gatewayPost<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${gatewayUrl()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`XMPP gateway ${path} failed: ${res.status} ${text}`);
+  }
+  return (await res.json()) as T;
+}
+
+async function sendTypingToGateway(platformId: string, threadId: string | null, fromJid: string): Promise<void> {
+  await gatewayPost('/v1/outbound/typing', {
+    from: fromJid,
+    to: platformId,
+    threadId,
+  });
+}
+
 async function deliverToGateway(
   platformId: string,
   threadId: string | null,
@@ -57,24 +78,13 @@ async function deliverToGateway(
     mediaType: 'application/octet-stream',
   }));
 
-  const res = await fetch(`${gatewayUrl()}/v1/outbound/deliver`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: fromJid,
-      to: platformId,
-      threadId,
-      content,
-      files,
-    }),
+  const json = await gatewayPost<{ messageId?: string }>('/v1/outbound/deliver', {
+    from: fromJid,
+    to: platformId,
+    threadId,
+    content,
+    files,
   });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`XMPP gateway deliver failed: ${res.status} ${text}`);
-  }
-
-  const json = (await res.json()) as { messageId?: string };
   return json.messageId;
 }
 
@@ -159,6 +169,19 @@ function createAdapter(): ChannelAdapter | null {
 
     isConnected() {
       return connected;
+    },
+
+    async setTyping(platformId: string, threadId: string | null, fromJid?: string) {
+      const senderJid = fromJid || fallbackFromJid;
+      if (!senderJid) {
+        log.debug('XMPP setTyping skipped — no fromJid');
+        return;
+      }
+      try {
+        await sendTypingToGateway(platformId, threadId, senderJid);
+      } catch (err) {
+        log.debug('XMPP typing indicator failed (best-effort)', { platformId, threadId, err });
+      }
     },
 
     async deliver(platformId, threadId, message, options) {
