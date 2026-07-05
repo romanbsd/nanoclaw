@@ -21,9 +21,28 @@ export function buildComposingStanza(opts: {
   threadId?: string | null;
   groupchat?: boolean;
 }): Element {
+  return buildChatStateStanza({ ...opts, state: 'composing' });
+}
+
+export function buildPausedStanza(opts: {
+  from: string;
+  to: string;
+  threadId?: string | null;
+  groupchat?: boolean;
+}): Element {
+  return buildChatStateStanza({ ...opts, state: 'paused' });
+}
+
+function buildChatStateStanza(opts: {
+  from: string;
+  to: string;
+  threadId?: string | null;
+  groupchat?: boolean;
+  state: 'composing' | 'paused';
+}): Element {
   const to = opts.to.split('/')[0];
   const type = opts.groupchat ? 'groupchat' : 'chat';
-  const children: Element[] = [xml('composing', { xmlns: CHATSTATES_NS })];
+  const children: Element[] = [xml(opts.state, { xmlns: CHATSTATES_NS })];
   if (opts.threadId) {
     children.unshift(xml('thread', {}, opts.threadId));
   }

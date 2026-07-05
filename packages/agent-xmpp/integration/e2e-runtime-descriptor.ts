@@ -1,6 +1,7 @@
 /**
  * Phase 2 E2E: publish runtime descriptor via gateway + discover_agents.
  */
+import { ensureDefaultAgentInbox } from './e2e-agent-setup.js';
 import { startE2eStack, stopE2eStack } from './e2e-stack.js';
 
 async function main(): Promise<void> {
@@ -8,6 +9,8 @@ async function main(): Promise<void> {
   const { config } = stack;
 
   try {
+    await ensureDefaultAgentInbox(config, config.gatewayUrl);
+
     const descriptor = {
       jid: config.agentJid,
       tenantId: config.xmppDomain,

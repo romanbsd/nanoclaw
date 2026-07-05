@@ -8,6 +8,8 @@
     "e2e:api": "node ../../../node_modules/tsx/dist/cli.mjs e2e-api-surface.ts",
     "e2e:provision": "node ../../../node_modules/tsx/dist/cli.mjs e2e-provision-identity.ts",
     "e2e:descriptor": "node ../../../node_modules/tsx/dist/cli.mjs e2e-runtime-descriptor.ts",
+    "e2e:c2s-tier1": "node ../../../node_modules/tsx/dist/cli.mjs e2e-c2s-tier1.ts",
+    "e2e:c2s-tier2": "node ../../../node_modules/tsx/dist/cli.mjs e2e-c2s-tier2.ts",
     "e2e:orchestrator": "node ../../../node_modules/tsx/dist/cli.mjs e2e-orchestrator-agents.ts",
     "demo:local-agents": "node ../../../node_modules/tsx/dist/cli.mjs run-local-agents-demo.ts",
     "auth-probe": "node ../../../node_modules/tsx/dist/cli.mjs auth-probe.ts",

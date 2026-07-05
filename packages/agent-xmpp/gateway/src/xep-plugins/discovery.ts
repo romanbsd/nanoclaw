@@ -54,6 +54,10 @@ export class AgentRegistry {
     return this.agents.get(jid)?.agentCard;
   }
 
+  hasAgent(jid: string): boolean {
+    return this.agents.has(jid.split('/')[0]);
+  }
+
   discover(input: XmppDiscoverAgentsInput): AgentDescriptor[] {
     let list = [...this.agents.values()];
     if (input.query) {

@@ -105,4 +105,12 @@ export class GatewayClient {
   publishDescriptor(body: PublishAgentDescriptorRequest) {
     return this.post<{ ok: boolean; jid: string }>('/v1/agents/publish_descriptor', body);
   }
+
+  registerInbox(jid: string, password: string) {
+    return this.post<{ ok: boolean; jid: string; ingress: string }>('/v1/agents/register_inbox', { jid, password });
+  }
+
+  unregisterAgent(jid: string) {
+    return this.post<{ ok: boolean; jid: string }>('/v1/agents/unregister', { jid });
+  }
 }

@@ -79,6 +79,13 @@ export interface ChannelDeliveryAdapter {
     instance?: string,
     agentGroupId?: string,
   ): Promise<void>;
+  clearTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    agentGroupId?: string,
+  ): Promise<void>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;

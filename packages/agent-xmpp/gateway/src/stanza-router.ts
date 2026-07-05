@@ -91,7 +91,7 @@ export class StanzaRouter {
     };
 
     void sendComposingForAgent(
-      this.sendForAgent,
+      (stanza) => this.sendForAgent(agentJid, stanza),
       agentJid,
       resolveInboundChatTargets(from, type, agentMsg),
     ).catch((err) => {

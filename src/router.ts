@@ -166,11 +166,16 @@ async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
   if (!agentGroup) {
     const agentMsg = agentMessageFromNanoclawContent(event.message.content);
     if (agentMsg && isXmppAgentEnvelope(agentMsg)) {
-      log.warn('XMPP inbound for unknown agent JID', { recipientJid, from: event.platformId });
+      log.warn('XMPP inbound for unknown agent JID', {
+        recipientJid,
+        from: event.platformId,
+        hint: 'Recipient not in agent_groups; if this is agent-to-agent, check gateway C2S loopback and provisioning',
+      });
     } else {
       log.debug('XMPP inbound for unknown agent JID from human sender', {
         recipientJid,
         from: event.platformId,
+        hint: 'Expected for human peers on the agent domain; gateway should not agent-loopback without a C2S session',
       });
     }
     return true;

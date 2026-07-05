@@ -59,11 +59,17 @@ async function gatewayPost<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function sendTypingToGateway(platformId: string, threadId: string | null, fromJid: string): Promise<void> {
+async function sendTypingToGateway(
+  platformId: string,
+  threadId: string | null,
+  fromJid: string,
+  state: 'composing' | 'paused' = 'composing',
+): Promise<void> {
   await gatewayPost('/v1/outbound/typing', {
     from: fromJid,
     to: platformId,
     threadId,
+    state,
   });
 }
 
@@ -215,9 +221,19 @@ function createAdapter(): ChannelAdapter | null {
         return;
       }
       try {
-        await sendTypingToGateway(platformId, threadId, senderJid);
+        await sendTypingToGateway(platformId, threadId, senderJid, 'composing');
       } catch (err) {
         log.debug('XMPP typing indicator failed (best-effort)', { platformId, threadId, err });
+      }
+    },
+
+    async clearTyping(platformId: string, threadId: string | null, fromJid?: string) {
+      const senderJid = fromJid || fallbackFromJid;
+      if (!senderJid) return;
+      try {
+        await sendTypingToGateway(platformId, threadId, senderJid, 'paused');
+      } catch (err) {
+        log.debug('XMPP clear typing failed (best-effort)', { platformId, threadId, err });
       }
     },
 

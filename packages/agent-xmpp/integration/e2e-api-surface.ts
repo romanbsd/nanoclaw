@@ -5,6 +5,7 @@
 import { agentMessageText } from '@agent-xmpp/protocol';
 
 import { GatewayClient } from './gateway-client.js';
+import { ensureDefaultAgentInbox } from './e2e-agent-setup.js';
 import { e2eConfig, startE2eStack, stopE2eStack } from './e2e-stack.js';
 import { bridgeState, lastInbound, waitForInbound } from './mock-bridge.js';
 import { runPingTest } from './ping-client.js';
@@ -265,6 +266,7 @@ async function main(): Promise<void> {
 
   try {
     stack = await startE2eStack();
+    await ensureDefaultAgentInbox(stack.config, stack.config.gatewayUrl);
     const api = new GatewayClient(stack.config.gatewayUrl);
     john = new XmppSession({
       service: stack.config.xmppService,

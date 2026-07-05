@@ -1,9 +1,10 @@
 import type { AgentMessage } from '@agent-xmpp/protocol';
 
+import { decideAgentLoopback, logAgentLoopback, type AgentLoopbackRegistry } from './agent-loopback.js';
 import type { GatewayConfig } from './config.js';
 import { pushInboundToBridge, shouldAcceptStanza, type InboundDeliveryContext } from './delivery.js';
+import type { AgentIngress } from './ingress/types.js';
 import type { Mailbox } from './mailbox.js';
-import { isAgentJid } from './xep-plugins/message.js';
 
 function bodyText(body: unknown): string {
   if (typeof body === 'string') return body;
@@ -16,14 +17,15 @@ function bodyText(body: unknown): string {
 /**
  * Agent-to-agent delivery loopback.
  *
- * Agents send/receive through the gateway XMPP component, not as OpenFire c2s users.
- * Outbound stanzas to another agent@domain are routed by OpenFire to user sessions when
- * those users exist — which bypasses the component — so we mirror the inbound path here
- * after every outbound agent→agent send (see http-server outbound handlers).
+ * Outbound agent→agent chat uses C2S when the sender has a registered inbox session.
+ * OpenFire delivers to the peer's C2S session without hitting the component inbound path,
+ * so we mirror the bridge enqueue here after every outbound agent→agent send.
  */
 export async function deliverLocalAgentMessage(
   config: GatewayConfig,
   mailbox: Mailbox,
+  c2sIngress: AgentIngress,
+  agentRegistry: AgentLoopbackRegistry | undefined,
   params: {
     fromJid: string;
     toJid: string;
@@ -35,8 +37,9 @@ export async function deliverLocalAgentMessage(
 ): Promise<boolean> {
   const fromBare = params.fromJid.split('/')[0];
   const toBare = params.toJid.split('/')[0];
-  if (!fromBare || !toBare || fromBare === toBare) return false;
-  if (!isAgentJid(toBare, config.agentDomain)) return false;
+  const loopback = decideAgentLoopback(params.fromJid, params.toJid, config.agentDomain, c2sIngress, agentRegistry);
+  logAgentLoopback(loopback, params.fromJid, params.toJid);
+  if (!loopback.loopback) return false;
 
   const text = bodyText(params.body);
   const agentNick = toBare.split('@')[0] ?? '';

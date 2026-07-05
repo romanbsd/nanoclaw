@@ -205,6 +205,7 @@ export interface ChannelAdapter {
 
   // Optional
   setTyping?(platformId: string, threadId: string | null, fromJid?: string): Promise<void>;
+  clearTyping?(platformId: string, threadId: string | null, fromJid?: string): Promise<void>;
   syncConversations?(): Promise<ConversationInfo[]>;
   resolveChannelName?(platformId: string): Promise<string | null>;
 

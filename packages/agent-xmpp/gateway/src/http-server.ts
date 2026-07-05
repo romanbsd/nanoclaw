@@ -32,7 +32,12 @@ import { defaultPubsubService, buildPublish } from './xep-plugins/pubsub.js';
 import { buildAckStanza } from './xep-plugins/receipts.js';
 import type { SendStanzaFn } from './stanza-router.js';
 import { deliverLocalAgentMessage } from './agent-local-delivery.js';
-import { createAgentSender, sendComposingForAgent, sendStanzaForAgent } from './agent-send.js';
+import {
+  createOutboundSender,
+  sendAgentStanzaRequired,
+  sendComposingForAgent,
+  sendPausedForAgent,
+} from './agent-send.js';
 import { isMucJid } from './xep-plugins/muc.js';
 import type { AgentIngress } from './ingress/index.js';
 import { buildPublishAgentCard } from './xep-plugins/a2a-binding.js';
@@ -51,10 +56,11 @@ export interface HttpServerDeps {
 export async function createHttpServer(deps: HttpServerDeps) {
   const app = Fastify({ logger: true });
   const { config, mailbox, send, agentRegistry, c2sIngress, pendingIq, mamAwaiter } = deps;
+  const sendOutbound = createOutboundSender(c2sIngress, send);
 
   app.get('/health', async () => ({ ok: true, gatewayId: config.gatewayId }));
 
-  app.post<{ Body: { from?: string; to: string; threadId?: string | null } }>(
+  app.post<{ Body: { from?: string; to: string; threadId?: string | null; state?: 'composing' | 'paused' } }>(
     '/v1/outbound/typing',
     async (req, reply) => {
       const fromJid = req.body.from || config.defaultAgentJid;
@@ -62,11 +68,16 @@ export async function createHttpServer(deps: HttpServerDeps) {
       if (!to) {
         return reply.status(400).send({ error: 'to required' });
       }
-      await sendComposingForAgent(createAgentSender(c2sIngress, send), fromJid, {
+      const targets = {
         to,
         threadId: req.body.threadId ?? null,
         groupchat: isMucJid(to),
-      });
+      };
+      if (req.body.state === 'paused') {
+        await sendPausedForAgent((stanza) => sendOutbound(fromJid, to, stanza), fromJid, targets);
+      } else {
+        await sendComposingForAgent((stanza) => sendOutbound(fromJid, to, stanza), fromJid, targets);
+      }
       return reply.send({ ok: true });
     },
   );
@@ -76,10 +87,10 @@ export async function createHttpServer(deps: HttpServerDeps) {
     const fromJid = body.from || config.defaultAgentJid;
     let stanza = buildOutboundStanza({ ...body, from: fromJid }, fromJid);
     stanza = applyStoreHints(stanza);
-    await send(stanza);
+    await sendOutbound(fromJid, body.to, stanza);
     const messageId = (stanza.attrs.id as string) || '';
     // OpenFire may deliver agent→agent stanzas to user sessions; loop back through the bridge locally.
-    await deliverLocalAgentMessage(config, mailbox, {
+    await deliverLocalAgentMessage(config, mailbox, c2sIngress, agentRegistry, {
       fromJid,
       toJid: body.to,
       messageId,
@@ -111,7 +122,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
       },
       fromJid,
     );
-    await send(applyStoreHints(stanza, req.body.policy));
+    await sendOutbound(fromJid, target.to, applyStoreHints(stanza, req.body.policy));
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -127,9 +138,8 @@ export async function createHttpServer(deps: HttpServerDeps) {
       },
       fromJid,
     );
-    await send(applyStoreHints(stanza, req.body.policy));
-    // Same loopback as /v1/outbound/deliver — xmpp.send_message targets other agents by JID.
-    await deliverLocalAgentMessage(config, mailbox, {
+    await sendOutbound(fromJid, req.body.to, applyStoreHints(stanza, req.body.policy));
+    await deliverLocalAgentMessage(config, mailbox, c2sIngress, agentRegistry, {
       fromJid,
       toJid: req.body.to,
       messageId: stanza.attrs.id as string,
@@ -145,28 +155,28 @@ export async function createHttpServer(deps: HttpServerDeps) {
   app.post<{ Body: XmppJoinRoomInput & { from?: string } }>('/v1/tools/xmpp.join_room', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildJoinPresence(req.body, fromJid);
-    await sendStanzaForAgent(fromJid, stanza, c2sIngress, send);
+    await sendOutbound(fromJid, req.body.roomJid, stanza);
     return reply.send({ ok: true });
   });
 
   app.post<{ Body: XmppLeaveRoomInput & { from?: string } }>('/v1/tools/xmpp.leave_room', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildLeavePresence(req.body, fromJid, req.body.nickname);
-    await sendStanzaForAgent(fromJid, stanza, c2sIngress, send);
+    await sendOutbound(fromJid, req.body.roomJid, stanza);
     return reply.send({ ok: true });
   });
 
   app.post<{ Body: XmppSendRoomMessageInput & { from?: string } }>('/v1/tools/xmpp.send_room_message', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildRoomMessage(req.body, fromJid);
-    await sendStanzaForAgent(fromJid, stanza, c2sIngress, send);
+    await sendOutbound(fromJid, req.body.roomJid, stanza);
     return reply.send({ messageId: stanza.attrs.id });
   });
 
   app.post<{ Body: XmppPublishEventInput & { from?: string } }>('/v1/tools/xmpp.publish_event', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const service = defaultPubsubService(config.agentDomain);
-    await send(buildPublish(fromJid, service, req.body));
+    await sendAgentStanzaRequired(fromJid, buildPublish(fromJid, service, req.body), c2sIngress);
     return reply.send({ ok: true, itemId: req.body.id || 'published' });
   });
 
@@ -216,7 +226,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
   app.post<{ Body: XmppShareFileInput & { from?: string } }>('/v1/tools/xmpp.share_file', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildFileShareStanza(req.body.to, fromJid, req.body.file, req.body.note, req.body.threadId);
-    await send(applyStoreHints(stanza, req.body.policy));
+    await sendOutbound(fromJid, req.body.to, applyStoreHints(stanza, req.body.policy));
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -255,11 +265,12 @@ export async function createHttpServer(deps: HttpServerDeps) {
     const type = agent.status === 'offline' ? 'unavailable' : undefined;
     const children = [xml('status', {}, `health:${descriptor.health}`)];
     if (show) children.unshift(xml('show', {}, show));
-    await send(xml('presence', { from: descriptor.jid, type }, ...children));
+    await sendAgentStanzaRequired(descriptor.jid, xml('presence', { from: descriptor.jid, type }, ...children), c2sIngress);
 
     const service = defaultPubsubService(config.agentDomain);
     const node = `agent-descriptor/${descriptor.jid.replace('@', '/')}`;
-    await send(
+    await sendAgentStanzaRequired(
+      descriptor.jid,
       buildPublish(descriptor.jid, service, {
         node,
         eventType: 'agent.runtime_descriptor',
@@ -267,9 +278,10 @@ export async function createHttpServer(deps: HttpServerDeps) {
         body: descriptor,
         contentType: 'application/vnd.agent-xmpp.runtime-descriptor+json',
       }),
+      c2sIngress,
     );
 
-    await send(buildPublishAgentCard(descriptor.jid, service, agentCard));
+    await sendAgentStanzaRequired(descriptor.jid, buildPublishAgentCard(descriptor.jid, service, agentCard), c2sIngress);
 
     return reply.send({ ok: true, jid: descriptor.jid, agentCard });
   });
@@ -282,6 +294,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
     try {
       await c2sIngress.register(jid, password);
       return reply.send({ ok: true, jid: jid.split('/')[0], ingress: c2sIngress.kind });
+      // eslint-disable-next-line no-catch-all/no-catch-all -- escalate to SIGKILL when register fails
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return reply.status(400).send({ error: message });
@@ -294,8 +307,11 @@ export async function createHttpServer(deps: HttpServerDeps) {
       return reply.status(400).send({ error: 'jid required' });
     }
     agentRegistry.unregister(jid);
+    const bare = jid.split('/')[0];
+    if (c2sIngress.hasSession?.(bare)) {
+      await sendAgentStanzaRequired(bare, xml('presence', { from: bare, type: 'unavailable' }), c2sIngress);
+    }
     await c2sIngress.unregister(jid);
-    await send(xml('presence', { from: jid, type: 'unavailable' }));
     return reply.send({ ok: true, jid });
   });
 
@@ -315,7 +331,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
     const type = req.body.status === 'offline' ? 'unavailable' : undefined;
     const children = req.body.message ? [xml('status', {}, req.body.message)] : [];
     if (show) children.unshift(xml('show', {}, show));
-    await send(xml('presence', { from: fromJid, type }, ...children));
+    await sendAgentStanzaRequired(fromJid, xml('presence', { from: fromJid, type }, ...children), c2sIngress);
     return reply.send({ ok: true });
   });
 
@@ -324,7 +340,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
     const toJid = req.body.to;
     mailbox.markAcked(req.body.messageId, req.body.status === 'failed' ? 'failed' : 'acked');
     if (toJid) {
-      await send(buildAckStanza(toJid, fromJid, req.body.messageId, req.body.status));
+      await sendOutbound(fromJid, toJid, buildAckStanza(toJid, fromJid, req.body.messageId, req.body.status));
     }
     return reply.send({ ok: true });
   });

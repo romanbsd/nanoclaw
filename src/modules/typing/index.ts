@@ -53,6 +53,13 @@ interface TypingAdapter {
     instance?: string,
     agentGroupId?: string,
   ): Promise<void>;
+  clearTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    agentGroupId?: string,
+  ): Promise<void>;
 }
 
 interface TypingTarget {
@@ -93,6 +100,21 @@ async function triggerTyping(
     // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
   } catch (err) {
     log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
+  }
+}
+
+async function clearTyping(
+  channelType: string,
+  platformId: string,
+  threadId: string | null,
+  instance?: string,
+  agentGroupId?: string,
+): Promise<void> {
+  try {
+    await adapter?.clearTyping?.(channelType, platformId, threadId, instance, agentGroupId);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
+  } catch (err) {
+    log.debug('Clear typing failed (best-effort)', { channelType, platformId, threadId, err });
   }
 }
 
@@ -196,11 +218,27 @@ export function pauseTypingRefreshAfterDelivery(sessionId: string): void {
   const entry = typingRefreshers.get(sessionId);
   if (!entry) return;
   entry.pausedUntil = Date.now() + POST_DELIVERY_PAUSE_MS;
+  clearTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.agentGroupId).catch((err) => {
+    log.debug('Clear typing failed (best-effort)', {
+      channelType: entry.channelType,
+      platformId: entry.platformId,
+      threadId: entry.threadId,
+      err,
+    });
+  });
 }
 
 export function stopTypingRefresh(sessionId: string): void {
   const entry = typingRefreshers.get(sessionId);
   if (!entry) return;
+  clearTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.agentGroupId).catch((err) => {
+    log.debug('Clear typing failed (best-effort)', {
+      channelType: entry.channelType,
+      platformId: entry.platformId,
+      threadId: entry.threadId,
+      err,
+    });
+  });
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
 }

@@ -124,6 +124,18 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
         channelType === 'xmpp' && agentGroupId ? (getAgentGroup(agentGroupId)?.xmpp_jid ?? undefined) : undefined;
       await adapter?.setTyping?.(platformId, threadId, fromJid);
     },
+    async clearTyping(
+      channelType: string,
+      platformId: string,
+      threadId: string | null,
+      instance?: string,
+      agentGroupId?: string,
+    ): Promise<void> {
+      const adapter = getChannelAdapterExact(instance ?? channelType);
+      const fromJid =
+        channelType === 'xmpp' && agentGroupId ? (getAgentGroup(agentGroupId)?.xmpp_jid ?? undefined) : undefined;
+      await adapter?.clearTyping?.(platformId, threadId, fromJid);
+    },
   };
 }
 
