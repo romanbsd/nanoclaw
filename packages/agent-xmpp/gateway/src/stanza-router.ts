@@ -71,15 +71,20 @@ export class StanzaRouter {
     if (!shouldAcceptStanza(type, from, bodyText, agentNick)) return;
 
     const stanzaId = agentMsg.id;
-    const { id: deliveryId, isDuplicate, redelivered } = this.mailbox.enqueue(
+    const { id: deliveryId, isDuplicate, redelivered, status } = this.mailbox.enqueue(
       stanzaId,
       agentJid,
       JSON.stringify(agentMsg),
     );
 
-    if (isDuplicate && !redelivered) return;
-    // Duplicate without redelivery flag: already bridged; skip unless host asked for retry.
-    if (isDuplicate && redelivered) this.mailbox.markRedelivered(stanzaId);
+    if (isDuplicate) {
+      const alreadyDelivered = status === 'delivered' || status === 'acked';
+      // Truly-handled duplicate the host didn't ask to retry → drop it.
+      if (alreadyDelivered && !redelivered) return;
+      // Either the host requested redelivery, or a prior push never completed
+      // (status still 'pending'/'failed') — mark and fall through to (re)deliver.
+      this.mailbox.markRedelivered(stanzaId);
+    }
 
     const ctx: InboundDeliveryContext = {
       agentMsg,
@@ -87,7 +92,7 @@ export class StanzaRouter {
       deliveryId,
       stanzaType: type,
       from,
-      redelivered: isDuplicate && redelivered,
+      redelivered: isDuplicate,
     };
 
     void sendComposingForAgent(

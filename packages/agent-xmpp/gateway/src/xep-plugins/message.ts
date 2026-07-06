@@ -1,7 +1,11 @@
 /** XEP-0432-inspired JSON, XEP-0481, XEP-0461, XEP-0334, XEP-0359 */
 
+import { createHash } from 'crypto';
+
 import { xml, type Element } from '@xmpp/xml';
 import { ulid } from 'ulid';
+
+import { isMucJid } from './jid.js';
 
 import type {
   AgentMessage,
@@ -25,7 +29,15 @@ export function extractStableId(stanza: Element): string {
   if (attrId) return attrId;
   const origin = stanza.getChild('origin-id', ORIGIN_ID_NS);
   if (origin?.attrs.id) return origin.attrs.id as string;
-  return ulid();
+  // No stanza id: derive a deterministic id from content so a redelivered stanza
+  // dedups instead of being processed twice. ponytail: content hash — two identical
+  // id-less messages collide; acceptable since servers virtually always stamp `id`.
+  const from = (stanza.attrs.from as string) || '';
+  const to = (stanza.attrs.to as string) || '';
+  const body = stanza.getChildText('body') || '';
+  const thread = stanza.getChild('thread')?.getText() || '';
+  const digest = createHash('sha256').update(`${from}\n${to}\n${thread}\n${body}`).digest('hex');
+  return `derived-${digest.slice(0, 26)}`;
 }
 
 function payloadText(stanza: Element): string | null {
@@ -76,7 +88,8 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
 
   const id = extractStableId(stanza);
   const threadEl = stanza.getChild('thread');
-  const threadId = threadEl?.getChildText('') || (threadEl?.attrs as { id?: string })?.id;
+  // XEP-0201: the thread id is the element's text content, not a child or attribute.
+  const threadId = threadEl?.getText()?.trim() || (threadEl?.attrs as { id?: string })?.id;
 
   const replyEl = stanza.getChild('reply', REPLY_NS);
   const replyTo = replyEl?.attrs.id as string | undefined;
@@ -193,8 +206,9 @@ export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string
     xml('payload', { xmlns: JSON_NS, datatype: contentType }, JSON.stringify(payload)),
   );
 
-  const to = req.threadId && req.to.includes('conference') ? req.to : req.to.split('/')[0];
-  const type = req.to.includes('conference') ? 'groupchat' : 'chat';
+  const isMuc = isMucJid(req.to);
+  const to = req.threadId && isMuc ? req.to : req.to.split('/')[0];
+  const type = isMuc ? 'groupchat' : 'chat';
 
   return xml('message', { type, id, to, from: fromJid }, ...children);
 }

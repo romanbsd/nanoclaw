@@ -120,7 +120,9 @@ export function buildFormResponsePayload(
     threadId,
     questionId: ctx.questionId,
     selectedIndex: ctx.selectedIndex,
-    userId: ctx.from.split('/')[0],
+    // In a MUC the occupant identity is the resource (room@muc/nick); keep the full JID so
+    // the answer is attributed to the responder, not to the room.
+    userId: isGroup ? ctx.from : ctx.from.split('/')[0],
     timestamp: new Date().toISOString(),
   };
 }

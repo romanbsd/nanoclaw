@@ -1,6 +1,7 @@
 /** XEP-0313 Message Archive Management, XEP-0059 Result Set Management */
 
 import { xml, type Element } from '@xmpp/xml';
+import { ulid } from 'ulid';
 
 import type { AgentMessage, XmppGetArchiveInput } from '@agent-xmpp/protocol';
 
@@ -10,7 +11,7 @@ const MAM_NS = 'urn:xmpp:mam:2';
 const RSM_NS = 'http://jabber.org/protocol/rsm';
 
 export function buildMamQuery(from: string, input: XmppGetArchiveInput): Element {
-  const queryId = `mam-${Date.now()}`;
+  const queryId = `mam-${ulid()}`;
   const withJid = input.with || input.roomId;
   const children: Element[] = [
     xml('query', { xmlns: MAM_NS, queryid: queryId }),
@@ -28,8 +29,10 @@ export function buildMamQuery(from: string, input: XmppGetArchiveInput): Element
     children.push(xml('set', { xmlns: RSM_NS }, ...rsmChildren));
   }
 
-  const to = input.roomId || from.split('@')[1] ? from : withJid || from;
-  return xml('iq', { type: 'set', from, to: input.roomId || from, id: queryId }, ...children);
+  // MUC archive queries go to the room; personal-archive queries go to the querier's
+  // own bare account JID (a full JID would target one resource's archive, not the account).
+  const to = input.roomId || from.split('/')[0];
+  return xml('iq', { type: 'set', from, to, id: queryId }, ...children);
 }
 
 export function parseMamResults(stanzas: Element[], agentDomain: string): AgentMessage[] {

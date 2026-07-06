@@ -41,8 +41,10 @@ export function buildAckStanza(
   from: string,
   messageId: string,
   status: 'received' | 'seen' | 'processing' | 'completed' | 'failed',
-): Element {
+): Element | null {
   if (status === 'received') return buildReceivedReceipt(to, from, messageId);
   if (status === 'seen' || status === 'completed') return buildDisplayedMarker(to, from, messageId);
-  return buildReceivedReceipt(to, from, messageId);
+  // 'processing' and 'failed' have no XEP-0184/0333 stanza. Emit nothing rather than a
+  // <received/>, which would falsely signal successful delivery to the peer.
+  return null;
 }

@@ -4,7 +4,10 @@ import { xml, type Element } from '@xmpp/xml';
 
 import type { XmppJoinRoomInput, XmppLeaveRoomInput, XmppSendRoomMessageInput } from '@agent-xmpp/protocol';
 
+import { isMucJid } from './jid.js';
 import { buildOutboundStanza } from './message.js';
+
+export { isMucJid };
 
 const MUC_NS = 'http://jabber.org/protocol/muc';
 
@@ -45,10 +48,6 @@ export function buildRoomMessage(input: XmppSendRoomMessageInput, fromJid: strin
   }
 
   return stanza;
-}
-
-export function isMucJid(jid: string): boolean {
-  return jid.includes('@conference.') || jid.includes('@groups.');
 }
 
 export function mucRoomFromStanza(from: string): string | null {

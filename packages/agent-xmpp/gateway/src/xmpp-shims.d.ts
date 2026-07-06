@@ -38,6 +38,7 @@ declare module '@xmpp/xml' {
     append(child: Element): void;
     getChild(name: string, xmlns?: string): Element | undefined;
     getChildText(name: string, xmlns?: string): string | undefined;
+    getText(): string;
     toString(): string;
   }
   export function xml(

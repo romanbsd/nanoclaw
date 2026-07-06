@@ -1,4 +1,6 @@
-import Fastify from 'fastify';
+import { timingSafeEqual } from 'crypto';
+
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 
 import {
   registrationFromDescriptor,
@@ -43,6 +45,26 @@ import type { AgentIngress } from './ingress/index.js';
 import { buildPublishAgentCard } from './xep-plugins/a2a-binding.js';
 import { xml } from './xmpp-component.js';
 
+/** Strip a `Bearer ` scheme prefix if present, else return the raw header value. */
+function bearerToken(header?: string): string {
+  if (!header) return '';
+  const m = /^Bearer\s+(.+)$/i.exec(header);
+  return m ? m[1] : header;
+}
+
+/** Constant-time secret comparison. Returns false on length mismatch (never throws). */
+function secretMatches(provided: string, expected: string): boolean {
+  if (!expected) return false;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+function isLoopbackHost(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
 export interface HttpServerDeps {
   config: GatewayConfig;
   mailbox: Mailbox;
@@ -57,6 +79,15 @@ export async function createHttpServer(deps: HttpServerDeps) {
   const app = Fastify({ logger: true });
   const { config, mailbox, send, agentRegistry, c2sIngress, pendingIq, mamAwaiter } = deps;
   const sendOutbound = createOutboundSender(c2sIngress, send);
+
+  // Control-plane endpoints (register/unregister/publish descriptor) require this secret when set.
+  // When unset, they are only reachable on a loopback bind (enforced before listen below).
+  const requireControl = (req: FastifyRequest, reply: FastifyReply): boolean => {
+    if (!config.controlSecret) return true;
+    if (secretMatches(bearerToken(req.headers.authorization), config.controlSecret)) return true;
+    reply.status(401).send({ error: 'Unauthorized' });
+    return false;
+  };
 
   app.get('/health', async () => ({ ok: true, gatewayId: config.gatewayId }));
 
@@ -244,18 +275,11 @@ export async function createHttpServer(deps: HttpServerDeps) {
   });
 
   app.post<{ Body: PublishAgentDescriptorRequest }>('/v1/agents/publish_descriptor', async (req, reply) => {
+    if (!requireControl(req, reply)) return;
     // Called by agent-runner on wake; feeds xmpp.discover_agents and capability-based routing.
     const descriptor = req.body;
     if (!descriptor.jid || !descriptor.tools || !descriptor.model || !descriptor.provider) {
       return reply.status(400).send({ error: 'Invalid descriptor: jid, tools, model, and provider are required' });
-    }
-
-    const secret = process.env.XMPP_DESCRIPTOR_SECRET;
-    if (secret) {
-      const auth = req.headers.authorization;
-      if (auth !== secret) {
-        return reply.status(401).send({ error: 'Unauthorized' });
-      }
     }
 
     const { agent, agentCard } = registrationFromDescriptor(descriptor);
@@ -287,6 +311,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
   });
 
   app.post<{ Body: { jid: string; password: string } }>('/v1/agents/register_inbox', async (req, reply) => {
+    if (!requireControl(req, reply)) return;
     const { jid, password } = req.body ?? {};
     if (!jid || typeof jid !== 'string' || !password || typeof password !== 'string') {
       return reply.status(400).send({ error: 'jid and password required' });
@@ -302,6 +327,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
   });
 
   app.post<{ Body: { jid: string } }>('/v1/agents/unregister', async (req, reply) => {
+    if (!requireControl(req, reply)) return;
     const jid = req.body?.jid;
     if (!jid || typeof jid !== 'string') {
       return reply.status(400).send({ error: 'jid required' });
@@ -340,10 +366,17 @@ export async function createHttpServer(deps: HttpServerDeps) {
     const toJid = req.body.to;
     mailbox.markAcked(req.body.messageId, req.body.status === 'failed' ? 'failed' : 'acked');
     if (toJid) {
-      await sendOutbound(fromJid, toJid, buildAckStanza(toJid, fromJid, req.body.messageId, req.body.status));
+      const ack = buildAckStanza(toJid, fromJid, req.body.messageId, req.body.status);
+      if (ack) await sendOutbound(fromJid, toJid, ack);
     }
     return reply.send({ ok: true });
   });
+
+  if (!isLoopbackHost(config.httpHost) && !config.controlSecret) {
+    throw new Error(
+      `Refusing to bind XMPP gateway control API to non-loopback host ${config.httpHost} without XMPP_DESCRIPTOR_SECRET set`,
+    );
+  }
 
   await app.listen({ host: config.httpHost, port: config.httpPort });
   return app;

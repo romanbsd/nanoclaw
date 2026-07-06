@@ -43,14 +43,15 @@ export class Mailbox {
     `);
   }
 
-  /** Returns false if stanza already seen (idempotency). */
-  enqueue(stanzaId: string, agentJid: string, payload: string): { id: string; isDuplicate: boolean; redelivered: boolean } {
+  /** Idempotency gate. `status` lets callers distinguish a truly-delivered duplicate from
+   *  a prior row whose bridge push never completed (still 'pending'/'failed'). */
+  enqueue(stanzaId: string, agentJid: string, payload: string): { id: string; isDuplicate: boolean; redelivered: boolean; status: MailboxStatus } {
     const existing = this.db.prepare('SELECT id, status, redelivered FROM mailbox WHERE stanza_id = ?').get(stanzaId) as
       | { id: string; status: MailboxStatus; redelivered: number }
       | undefined;
 
     if (existing) {
-      return { id: existing.id, isDuplicate: true, redelivered: existing.redelivered === 1 };
+      return { id: existing.id, isDuplicate: true, redelivered: existing.redelivered === 1, status: existing.status };
     }
 
     const id = ulid();
@@ -61,7 +62,7 @@ export class Mailbox {
          VALUES (?, ?, ?, ?, 'pending', ?, ?, 0)`,
       )
       .run(id, stanzaId, agentJid, payload, now, now);
-    return { id, isDuplicate: false, redelivered: false };
+    return { id, isDuplicate: false, redelivered: false, status: 'pending' };
   }
 
   markDelivered(stanzaId: string): void {
