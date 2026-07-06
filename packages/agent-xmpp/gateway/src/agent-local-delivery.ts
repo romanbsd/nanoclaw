@@ -1,18 +1,11 @@
-import type { AgentMessage } from '@agent-xmpp/protocol';
+import { agentMessageText, type AgentMessage } from '@agent-xmpp/protocol';
 
 import { decideAgentLoopback, logAgentLoopback, type AgentLoopbackRegistry } from './agent-loopback.js';
+import { bareJid } from './xep-plugins/jid.js';
 import type { GatewayConfig } from './config.js';
 import { pushInboundToBridge, shouldAcceptStanza, type InboundDeliveryContext } from './delivery.js';
 import type { AgentIngress } from './ingress/types.js';
 import type { Mailbox } from './mailbox.js';
-
-function bodyText(body: unknown): string {
-  if (typeof body === 'string') return body;
-  if (body && typeof body === 'object' && 'text' in body) {
-    return String((body as { text?: unknown }).text ?? '');
-  }
-  return typeof body === 'object' && body !== null ? JSON.stringify(body) : String(body);
-}
 
 /**
  * Agent-to-agent delivery loopback.
@@ -35,15 +28,11 @@ export async function deliverLocalAgentMessage(
     replyTo?: string;
   },
 ): Promise<boolean> {
-  const fromBare = params.fromJid.split('/')[0];
-  const toBare = params.toJid.split('/')[0];
+  const fromBare = bareJid(params.fromJid);
+  const toBare = bareJid(params.toJid);
   const loopback = decideAgentLoopback(params.fromJid, params.toJid, config.agentDomain, c2sIngress, agentRegistry);
   logAgentLoopback(loopback, params.fromJid, params.toJid);
   if (!loopback.loopback) return false;
-
-  const text = bodyText(params.body);
-  const agentNick = toBare.split('@')[0] ?? '';
-  if (!shouldAcceptStanza('chat', fromBare, text, agentNick)) return false;
 
   const agentMsg: AgentMessage = {
     id: params.messageId,
@@ -55,6 +44,9 @@ export async function deliverLocalAgentMessage(
     body: params.body,
     replyTo: params.replyTo,
   };
+
+  const agentNick = toBare.split('@')[0] ?? '';
+  if (!shouldAcceptStanza('chat', fromBare, agentMessageText(agentMsg), agentNick)) return false;
 
   const { id: deliveryId, isDuplicate, redelivered } = mailbox.enqueue(
     agentMsg.id,

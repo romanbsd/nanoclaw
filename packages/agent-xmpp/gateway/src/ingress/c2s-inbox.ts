@@ -13,6 +13,7 @@ import { xml, type Element } from '@xmpp/xml';
 
 import type { GatewayConfig } from '../config.js';
 import type { AgentIngress, StanzaHandler } from './types.js';
+import { bareJid } from '../xep-plugins/jid.js';
 
 interface InboxSession {
   xmpp: ReturnType<typeof client>;
@@ -30,12 +31,12 @@ export class C2sAgentIngress implements AgentIngress {
   ) {}
 
   hasSession(jid: string): boolean {
-    const bare = jid.split('/')[0];
+    const bare = bareJid(jid);
     return this.sessions.has(bare);
   }
 
   async sendStanza(jid: string, stanza: Element): Promise<void> {
-    const bare = jid.split('/')[0];
+    const bare = bareJid(jid);
     const session = this.sessions.get(bare);
     if (!session) {
       throw new Error(`No C2S session for ${bare}`);
@@ -44,7 +45,7 @@ export class C2sAgentIngress implements AgentIngress {
   }
 
   async register(jid: string, password: string): Promise<void> {
-    const bare = jid.split('/')[0];
+    const bare = bareJid(jid);
     if (!bare.includes('@')) {
       throw new Error(`Invalid agent JID: ${jid}`);
     }
@@ -90,7 +91,7 @@ export class C2sAgentIngress implements AgentIngress {
   }
 
   async unregister(jid: string): Promise<void> {
-    const bare = jid.split('/')[0];
+    const bare = bareJid(jid);
     const session = this.sessions.get(bare);
     if (!session) return;
     this.sessions.delete(bare);

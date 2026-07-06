@@ -5,6 +5,7 @@ import { ulid } from 'ulid';
 
 import type { AgentMessage, XmppGetArchiveInput } from '@agent-xmpp/protocol';
 
+import { bareJid } from './jid.js';
 import { stanzaToAgentMessage } from './message.js';
 
 const MAM_NS = 'urn:xmpp:mam:2';
@@ -31,7 +32,7 @@ export function buildMamQuery(from: string, input: XmppGetArchiveInput): Element
 
   // MUC archive queries go to the room; personal-archive queries go to the querier's
   // own bare account JID (a full JID would target one resource's archive, not the account).
-  const to = input.roomId || from.split('/')[0];
+  const to = input.roomId || bareJid(from);
   return xml('iq', { type: 'set', from, to, id: queryId }, ...children);
 }
 

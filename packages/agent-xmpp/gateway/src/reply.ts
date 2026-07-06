@@ -1,5 +1,7 @@
 import type { AgentMessage } from '@agent-xmpp/protocol';
 
+import { bareJid } from './xep-plugins/jid.js';
+
 export function resolveReplyTarget(
   original: AgentMessage | null,
   explicitTo?: string,
@@ -10,7 +12,7 @@ export function resolveReplyTarget(
   }
   if (!original) return null;
   return {
-    to: original.roomId || original.from.split('/')[0],
+    to: original.roomId || bareJid(original.from),
     threadId: explicitThreadId ?? original.threadId,
   };
 }

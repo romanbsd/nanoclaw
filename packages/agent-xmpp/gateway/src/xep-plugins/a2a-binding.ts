@@ -1,6 +1,7 @@
 /** A2A binding identification: Agent Card PEP, per-agent disco, IQ fetch. */
 
 import { xml, type Element } from '@xmpp/xml';
+import { ulid } from 'ulid';
 
 import {
   A2A_AGENT_DISCO_FEATURES,
@@ -11,6 +12,7 @@ import {
 
 import type { GatewayConfig } from '../config.js';
 import type { AgentRegistry } from './discovery.js';
+import { bareJid } from './jid.js';
 import { isAgentJid } from './message.js';
 
 const DISCO_NS = 'http://jabber.org/protocol/disco#info';
@@ -87,7 +89,7 @@ export function buildAgentCardA2aIqResponse(
 export function buildPublishAgentCard(fromJid: string, pubsubService: string, card: A2aAgentCard): Element {
   return xml(
     'iq',
-    { type: 'set', from: fromJid, to: pubsubService, id: `a2a-card-${Date.now()}` },
+    { type: 'set', from: fromJid, to: pubsubService, id: `a2a-card-${ulid()}` },
     xml(
       'pubsub',
       { xmlns: PUBSUB_NS },
@@ -101,7 +103,7 @@ export function buildPublishAgentCard(fromJid: string, pubsubService: string, ca
 }
 
 function gatewayTarget(toBare: string, config: GatewayConfig): boolean {
-  return toBare === config.componentJid.split('/')[0];
+  return toBare === bareJid(config.componentJid);
 }
 
 /** Handle A2A binding IQ gets routed to an agent bare JID or gateway. Returns null if unrelated. */
@@ -121,7 +123,7 @@ export function handleBindingIq(
   const onGateway = gatewayTarget(toBare, config);
   if (!onAgent && !onGateway) return null;
 
-  const replyFrom = onAgent ? toBare : config.componentJid.split('/')[0];
+  const replyFrom = onAgent ? toBare : bareJid(config.componentJid);
   const card = onAgent ? registry.getAgentCard(toBare) : undefined;
 
   const pubsub = stanza.getChild('pubsub', PUBSUB_NS);

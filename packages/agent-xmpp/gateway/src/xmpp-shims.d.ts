@@ -51,7 +51,3 @@ declare module '@xmpp/xml' {
 declare module '@xmpp/reconnect' {
   export function reconnect(client: unknown, options?: { delay?: number }): unknown;
 }
-
-declare module '@xmpp/jid' {
-  export function jid(value: string): { bare: string; domain: string; resource?: string };
-}

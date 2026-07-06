@@ -25,7 +25,9 @@ export function agentMessageFromNanoclawContent(raw: string): AgentMessage | nul
 /** Human-readable text from a normative AgentMessage. */
 export function agentMessageText(msg: AgentMessage): string {
   if (typeof msg.body === 'string') return msg.body;
-  if (msg.kind === 'text') return String(msg.body);
+  if (msg.body && typeof msg.body === 'object' && 'text' in msg.body) {
+    return String((msg.body as { text?: unknown }).text ?? '');
+  }
   return JSON.stringify(msg.body);
 }
 

@@ -19,7 +19,7 @@ export interface UploadSlot {
 export function buildSlotRequest(from: string, to: string, size: number, mediaType: string, filename: string): Element {
   return xml(
     'iq',
-    { type: 'get', from, to, id: `upload-${Date.now()}` },
+    { type: 'get', from, to, id: `upload-${ulid()}` },
     xml('request', {
       xmlns: HTTP_UPLOAD_NS,
       filename,

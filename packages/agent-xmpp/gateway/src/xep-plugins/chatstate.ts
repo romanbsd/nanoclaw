@@ -2,6 +2,8 @@
 
 import { xml, type Element } from '@xmpp/xml';
 
+import { bareJid } from './jid.js';
+
 const CHATSTATES_NS = 'http://jabber.org/protocol/chatstates';
 
 export function isChatStateStanza(stanza: Element): boolean {
@@ -40,11 +42,11 @@ function buildChatStateStanza(opts: {
   groupchat?: boolean;
   state: 'composing' | 'paused';
 }): Element {
-  const to = opts.to.split('/')[0];
+  const to = bareJid(opts.to);
   const type = opts.groupchat ? 'groupchat' : 'chat';
   const children: Element[] = [xml(opts.state, { xmlns: CHATSTATES_NS })];
   if (opts.threadId) {
     children.unshift(xml('thread', {}, opts.threadId));
   }
-  return xml('message', { type, to, from: opts.from.split('/')[0] }, ...children);
+  return xml('message', { type, to, from: bareJid(opts.from) }, ...children);
 }

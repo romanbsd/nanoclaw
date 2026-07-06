@@ -3,8 +3,9 @@ import { agentMessageText } from '@agent-xmpp/protocol';
 
 import type { GatewayConfig } from './config.js';
 import type { Mailbox } from './mailbox.js';
-import { getRuntimeInboundPort } from './runtime-inbound/index.js';
+import { deliverToBridge } from './runtime-inbound.js';
 import { buildInboundEnvelope } from './xep-plugins/message.js';
+import { bareJid } from './xep-plugins/jid.js';
 import { mucRoomFromStanza } from './xep-plugins/muc.js';
 import { isMentionForAgent, shouldDeliverInbound } from './xep-plugins/routing.js';
 
@@ -25,14 +26,11 @@ export function shouldAcceptStanza(stanzaType: string, from: string, bodyText: s
 }
 
 export interface InboundChatTargets {
-  /** Reply/typing destination: MUC room JID or bare sender JID. */
+  /** Reply/typing destination and host router session key: MUC room JID or bare sender JID. */
   to: string;
   threadId: string | null;
+  /** True for MUC/groupchat traffic. */
   groupchat: boolean;
-  /** Same as `to` — host router session key. */
-  platformId: string;
-  /** Same as `groupchat`. */
-  isGroup: boolean;
 }
 
 /** Resolve where replies and typing notifications for an inbound stanza should go. */
@@ -42,10 +40,10 @@ export function resolveInboundChatTargets(
   agentMsg: Pick<AgentMessage, 'from' | 'threadId'>,
 ): InboundChatTargets {
   const room = mucRoomFromStanza(from);
-  const isGroup = stanzaType === 'groupchat' || !!room;
-  const to = isGroup && room ? room : agentMsg.from.split('/')[0];
-  const threadId = agentMsg.threadId || (isGroup ? room || null : null);
-  return { to, threadId, groupchat: isGroup, platformId: to, isGroup };
+  const groupchat = stanzaType === 'groupchat' || !!room;
+  const to = groupchat && room ? room : bareJid(agentMsg.from);
+  const threadId = agentMsg.threadId || (groupchat ? room || null : null);
+  return { to, threadId, groupchat };
 }
 
 export function buildBridgePayload(
@@ -53,7 +51,7 @@ export function buildBridgePayload(
   ctx: InboundDeliveryContext,
 ): BridgeInboundPayload {
   const { agentMsg, agentJid, deliveryId, stanzaType, from, redelivered } = ctx;
-  const { platformId, threadId, isGroup } = resolveInboundChatTargets(from, stanzaType, agentMsg);
+  const { to: platformId, threadId, groupchat: isGroup } = resolveInboundChatTargets(from, stanzaType, agentMsg);
   const bodyText = agentMessageText(agentMsg);
   const agentNick = agentJid.split('@')[0];
   const isMention = isMentionForAgent(stanzaType, bodyText, agentNick);
@@ -91,8 +89,7 @@ export async function pushInboundToBridge(
   mailbox: Mailbox,
   ctx: InboundDeliveryContext,
 ): Promise<void> {
-  const port = getRuntimeInboundPort(config);
-  await port.deliver(buildBridgePayload(config, ctx));
+  await deliverToBridge(config, buildBridgePayload(config, ctx));
   mailbox.markDelivered(ctx.agentMsg.id);
 }
 
@@ -108,10 +105,11 @@ export function buildFormResponsePayload(
   _config: GatewayConfig,
   ctx: FormResponseContext,
 ): BridgeFormResponsePayload {
-  const room = mucRoomFromStanza(ctx.from);
-  const isGroup = ctx.stanzaType === 'groupchat' || !!room;
-  const platformId = isGroup && room ? room : ctx.from.split('/')[0];
-  const threadId = isGroup ? room || null : null;
+  const { to: platformId, threadId, groupchat: isGroup } = resolveInboundChatTargets(
+    ctx.from,
+    ctx.stanzaType,
+    { from: ctx.from, threadId: undefined },
+  );
 
   return {
     type: 'form_response',
@@ -122,7 +120,7 @@ export function buildFormResponsePayload(
     selectedIndex: ctx.selectedIndex,
     // In a MUC the occupant identity is the resource (room@muc/nick); keep the full JID so
     // the answer is attributed to the responder, not to the room.
-    userId: isGroup ? ctx.from : ctx.from.split('/')[0],
+    userId: isGroup ? ctx.from : platformId,
     timestamp: new Date().toISOString(),
   };
 }
@@ -131,6 +129,5 @@ export async function pushFormResponseToBridge(
   config: GatewayConfig,
   ctx: FormResponseContext,
 ): Promise<void> {
-  const port = getRuntimeInboundPort(config);
-  await port.deliver(buildFormResponsePayload(config, ctx));
+  await deliverToBridge(config, buildFormResponsePayload(config, ctx));
 }

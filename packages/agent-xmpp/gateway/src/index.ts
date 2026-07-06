@@ -7,6 +7,7 @@ import { C2sAgentIngress } from './ingress/index.js';
 import { createHttpServer } from './http-server.js';
 import { Mailbox } from './mailbox.js';
 import { createAgentSender } from './agent-send.js';
+import { bareJid } from './xep-plugins/jid.js';
 import { StanzaRouter } from './stanza-router.js';
 import { handleBindingIq } from './xep-plugins/a2a-binding.js';
 import { AgentRegistry, buildGatewayDiscoResponse } from './xep-plugins/discovery.js';
@@ -28,8 +29,8 @@ async function main(): Promise<void> {
       const from = stanza.attrs.from as string;
       const to = stanza.attrs.to as string;
       const iqId = stanza.attrs.id as string;
-      const toBare = to.split('/')[0];
-      if (toBare === config.componentJid.split('/')[0]) {
+      const toBare = bareJid(to);
+      if (toBare === bareJid(config.componentJid)) {
         return buildGatewayDiscoResponse(toBare, from, config.agentDomain, iqId);
       }
     }

@@ -35,12 +35,13 @@ import { buildAckStanza } from './xep-plugins/receipts.js';
 import type { SendStanzaFn } from './stanza-router.js';
 import { deliverLocalAgentMessage } from './agent-local-delivery.js';
 import {
-  createOutboundSender,
+  createAgentSender,
   sendAgentStanzaRequired,
   sendComposingForAgent,
   sendPausedForAgent,
 } from './agent-send.js';
 import { isMucJid } from './xep-plugins/muc.js';
+import { bareJid } from './xep-plugins/jid.js';
 import type { AgentIngress } from './ingress/index.js';
 import { buildPublishAgentCard } from './xep-plugins/a2a-binding.js';
 import { xml } from './xmpp-component.js';
@@ -78,7 +79,7 @@ export interface HttpServerDeps {
 export async function createHttpServer(deps: HttpServerDeps) {
   const app = Fastify({ logger: true });
   const { config, mailbox, send, agentRegistry, c2sIngress, pendingIq, mamAwaiter } = deps;
-  const sendOutbound = createOutboundSender(c2sIngress, send);
+  const sendOutbound = createAgentSender(c2sIngress, send);
 
   // Control-plane endpoints (register/unregister/publish descriptor) require this secret when set.
   // When unset, they are only reachable on a loopback bind (enforced before listen below).
@@ -105,9 +106,9 @@ export async function createHttpServer(deps: HttpServerDeps) {
         groupchat: isMucJid(to),
       };
       if (req.body.state === 'paused') {
-        await sendPausedForAgent((stanza) => sendOutbound(fromJid, to, stanza), fromJid, targets);
+        await sendPausedForAgent((stanza) => sendOutbound(fromJid, stanza), fromJid, targets);
       } else {
-        await sendComposingForAgent((stanza) => sendOutbound(fromJid, to, stanza), fromJid, targets);
+        await sendComposingForAgent((stanza) => sendOutbound(fromJid, stanza), fromJid, targets);
       }
       return reply.send({ ok: true });
     },
@@ -118,7 +119,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
     const fromJid = body.from || config.defaultAgentJid;
     let stanza = buildOutboundStanza({ ...body, from: fromJid }, fromJid);
     stanza = applyStoreHints(stanza);
-    await sendOutbound(fromJid, body.to, stanza);
+    await sendOutbound(fromJid, stanza);
     const messageId = (stanza.attrs.id as string) || '';
     // OpenFire may deliver agent→agent stanzas to user sessions; loop back through the bridge locally.
     await deliverLocalAgentMessage(config, mailbox, c2sIngress, agentRegistry, {
@@ -153,7 +154,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
       },
       fromJid,
     );
-    await sendOutbound(fromJid, target.to, applyStoreHints(stanza, req.body.policy));
+    await sendOutbound(fromJid, applyStoreHints(stanza, req.body.policy));
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -169,7 +170,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
       },
       fromJid,
     );
-    await sendOutbound(fromJid, req.body.to, applyStoreHints(stanza, req.body.policy));
+    await sendOutbound(fromJid, applyStoreHints(stanza, req.body.policy));
     await deliverLocalAgentMessage(config, mailbox, c2sIngress, agentRegistry, {
       fromJid,
       toJid: req.body.to,
@@ -186,21 +187,21 @@ export async function createHttpServer(deps: HttpServerDeps) {
   app.post<{ Body: XmppJoinRoomInput & { from?: string } }>('/v1/tools/xmpp.join_room', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildJoinPresence(req.body, fromJid);
-    await sendOutbound(fromJid, req.body.roomJid, stanza);
+    await sendOutbound(fromJid, stanza);
     return reply.send({ ok: true });
   });
 
   app.post<{ Body: XmppLeaveRoomInput & { from?: string } }>('/v1/tools/xmpp.leave_room', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildLeavePresence(req.body, fromJid, req.body.nickname);
-    await sendOutbound(fromJid, req.body.roomJid, stanza);
+    await sendOutbound(fromJid, stanza);
     return reply.send({ ok: true });
   });
 
   app.post<{ Body: XmppSendRoomMessageInput & { from?: string } }>('/v1/tools/xmpp.send_room_message', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildRoomMessage(req.body, fromJid);
-    await sendOutbound(fromJid, req.body.roomJid, stanza);
+    await sendOutbound(fromJid, stanza);
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -257,7 +258,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
   app.post<{ Body: XmppShareFileInput & { from?: string } }>('/v1/tools/xmpp.share_file', async (req, reply) => {
     const fromJid = req.body.from || config.defaultAgentJid;
     const stanza = buildFileShareStanza(req.body.to, fromJid, req.body.file, req.body.note, req.body.threadId);
-    await sendOutbound(fromJid, req.body.to, applyStoreHints(stanza, req.body.policy));
+    await sendOutbound(fromJid, applyStoreHints(stanza, req.body.policy));
     return reply.send({ messageId: stanza.attrs.id });
   });
 
@@ -318,7 +319,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
     }
     try {
       await c2sIngress.register(jid, password);
-      return reply.send({ ok: true, jid: jid.split('/')[0], ingress: c2sIngress.kind });
+      return reply.send({ ok: true, jid: bareJid(jid), ingress: c2sIngress.kind });
       // eslint-disable-next-line no-catch-all/no-catch-all -- escalate to SIGKILL when register fails
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -333,7 +334,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
       return reply.status(400).send({ error: 'jid required' });
     }
     agentRegistry.unregister(jid);
-    const bare = jid.split('/')[0];
+    const bare = bareJid(jid);
     if (c2sIngress.hasSession?.(bare)) {
       await sendAgentStanzaRequired(bare, xml('presence', { from: bare, type: 'unavailable' }), c2sIngress);
     }
@@ -367,7 +368,7 @@ export async function createHttpServer(deps: HttpServerDeps) {
     mailbox.markAcked(req.body.messageId, req.body.status === 'failed' ? 'failed' : 'acked');
     if (toJid) {
       const ack = buildAckStanza(toJid, fromJid, req.body.messageId, req.body.status);
-      if (ack) await sendOutbound(fromJid, toJid, ack);
+      if (ack) await sendOutbound(fromJid, ack);
     }
     return reply.send({ ok: true });
   });

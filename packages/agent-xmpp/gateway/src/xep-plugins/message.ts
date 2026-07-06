@@ -5,7 +5,7 @@ import { createHash } from 'crypto';
 import { xml, type Element } from '@xmpp/xml';
 import { ulid } from 'ulid';
 
-import { isMucJid } from './jid.js';
+import { bareJid, isMucJid } from './jid.js';
 
 import type {
   AgentMessage,
@@ -97,8 +97,8 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
   const json = parseJsonPayload(stanza);
   const text = bodyText(stanza);
   const isMuc = type === 'groupchat';
-  const roomId = isMuc ? from.split('/')[0] : undefined;
-  const fromBare = from.split('/')[0];
+  const roomId = isMuc ? bareJid(from) : undefined;
+  const fromBare = bareJid(from);
 
   let kind: MessageKind = json?.kind || 'text';
   let contentType = json?.contentType || 'text/plain';
@@ -126,7 +126,7 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
   return {
     id,
     from: isMuc ? from : fromBare,
-    to: to.split('/')[0],
+    to: bareJid(to),
     threadId: threadId || undefined,
     roomId,
     kind,
@@ -158,12 +158,12 @@ export function buildInboundEnvelope(
 }
 
 export function isAgentJid(jid: string, agentDomain: string): boolean {
-  const bare = jid.split('/')[0];
+  const bare = bareJid(jid);
   return bare.endsWith(`@${agentDomain}`);
 }
 
 export function resolveTargetAgentJid(to: string, agentDomain: string, defaultAgent: string): string {
-  const bare = to.split('/')[0];
+  const bare = bareJid(to);
   if (isAgentJid(bare, agentDomain)) return bare;
   // Traffic to the bare component address is attributed to the default agent for this gateway.
   return defaultAgent;
@@ -207,7 +207,7 @@ export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string
   );
 
   const isMuc = isMucJid(req.to);
-  const to = req.threadId && isMuc ? req.to : req.to.split('/')[0];
+  const to = req.threadId && isMuc ? req.to : bareJid(req.to);
   const type = isMuc ? 'groupchat' : 'chat';
 
   return xml('message', { type, id, to, from: fromJid }, ...children);

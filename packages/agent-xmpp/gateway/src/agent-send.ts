@@ -1,6 +1,7 @@
 import type { Element } from '@xmpp/xml';
 
 import { logOutboundRoute } from './agent-loopback.js';
+import { bareJid } from './xep-plugins/jid.js';
 import type { InboundChatTargets } from './delivery.js';
 import type { AgentIngress } from './ingress/types.js';
 import { buildComposingStanza, buildPausedStanza, isChatStateStanza } from './xep-plugins/chatstate.js';
@@ -13,7 +14,7 @@ export async function sendStanzaForAgent(
   c2sIngress: AgentIngress,
   componentSend: SendStanzaFn,
 ): Promise<void> {
-  const bare = fromJid.split('/')[0];
+  const bare = bareJid(fromJid);
   const stanzaName = stanza.name ?? 'stanza';
   if (c2sIngress.hasSession?.(bare)) {
     if (!isChatStateStanza(stanza)) {
@@ -32,20 +33,13 @@ export function createAgentSender(c2sIngress: AgentIngress, componentSend: SendS
   return (agentJid, stanza) => sendStanzaForAgent(agentJid, stanza, c2sIngress, componentSend);
 }
 
-export function createOutboundSender(
-  c2sIngress: AgentIngress,
-  componentSend: SendStanzaFn,
-): (fromJid: string, _toJid: string, stanza: Element) => Promise<void> {
-  return (fromJid, _toJid, stanza) => sendStanzaForAgent(fromJid, stanza, c2sIngress, componentSend);
-}
-
 /** Agent presence/pubsub — must use C2S; no component fallback. */
 export async function sendAgentStanzaRequired(
   fromJid: string,
   stanza: Element,
   c2sIngress: AgentIngress,
 ): Promise<void> {
-  const bare = fromJid.split('/')[0];
+  const bare = bareJid(fromJid);
   if (!c2sIngress.hasSession?.(bare)) {
     throw new Error(`No C2S session for ${bare} — register_inbox first`);
   }

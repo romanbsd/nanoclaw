@@ -1,8 +1,11 @@
 /** XEP-0030 Service Discovery, XEP-0115 Entity Capabilities (basic) */
 
 import { xml, type Element } from '@xmpp/xml';
+import { ulid } from 'ulid';
 
 import { A2A_XMPP_BINDING_URI, type A2aAgentCard, type AgentDescriptor, type XmppDiscoverAgentsInput } from '@agent-xmpp/protocol';
+
+import { bareJid } from './jid.js';
 
 const DISCO_NS = 'http://jabber.org/protocol/disco#info';
 
@@ -17,7 +20,7 @@ function capabilityMatches(caps: string[], required: string): boolean {
 }
 
 export function buildDiscoInfo(to: string, from: string): Element {
-  return xml('iq', { type: 'get', from, to, id: `disco-${Date.now()}` }, xml('query', { xmlns: DISCO_NS }));
+  return xml('iq', { type: 'get', from, to, id: `disco-${ulid()}` }, xml('query', { xmlns: DISCO_NS }));
 }
 
 export function buildGatewayDiscoResponse(from: string, to: string, agentDomain: string, iqId: string): Element {
@@ -55,7 +58,7 @@ export class AgentRegistry {
   }
 
   hasAgent(jid: string): boolean {
-    return this.agents.has(jid.split('/')[0]);
+    return this.agents.has(bareJid(jid));
   }
 
   discover(input: XmppDiscoverAgentsInput): AgentDescriptor[] {

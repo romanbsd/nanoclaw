@@ -5,7 +5,7 @@ import { ulid } from 'ulid';
 
 import type { AskQuestionPayload, OutboundDeliverRequest } from '@agent-xmpp/protocol';
 
-import { isMucJid } from './jid.js';
+import { bareJid, isMucJid } from './jid.js';
 
 export const DATA_FORM_NS = 'jabber:x:data';
 export const ASK_QUESTION_FORM_TYPE = 'urn:xmpp:nanoclaw:ask-question:0';
@@ -80,7 +80,7 @@ export function buildAskQuestionFormStanza(req: OutboundDeliverRequest, fromJid:
   }
 
   const isMuc = isMucJid(req.to);
-  const to = req.threadId && isMuc ? req.to : req.to.split('/')[0];
+  const to = req.threadId && isMuc ? req.to : bareJid(req.to);
   const type = isMuc ? 'groupchat' : 'chat';
 
   return xml('message', { type, id, to, from: fromJid }, ...children);

@@ -1,4 +1,5 @@
 import type { AgentIngress } from './ingress/types.js';
+import { bareJid } from './xep-plugins/jid.js';
 import { isAgentJid } from './xep-plugins/message.js';
 import { isMucJid } from './xep-plugins/muc.js';
 
@@ -26,8 +27,8 @@ export function decideAgentLoopback(
   c2sIngress: AgentIngress,
   agentRegistry?: AgentLoopbackRegistry,
 ): AgentLoopbackDecision {
-  const fromBare = fromJid.split('/')[0];
-  const toBare = toJid.split('/')[0];
+  const fromBare = bareJid(fromJid);
+  const toBare = bareJid(toJid);
   if (!fromBare || !toBare || fromBare === toBare) {
     return { loopback: false, reason: 'self-send' };
   }
@@ -45,7 +46,7 @@ export function decideAgentLoopback(
 }
 
 export function logAgentLoopback(decision: AgentLoopbackDecision, fromJid: string, toJid: string): void {
-  const detail = `${fromJid.split('/')[0]} → ${toJid.split('/')[0]} (${decision.reason})`;
+  const detail = `${bareJid(fromJid)} → ${bareJid(toJid)} (${decision.reason})`;
   if (decision.loopback) {
     console.error(`[xmpp-gateway] agent loopback: ${detail}`);
   } else {
@@ -56,6 +57,6 @@ export function logAgentLoopback(decision: AgentLoopbackDecision, fromJid: strin
 export function logOutboundRoute(fromJid: string, via: 'c2s' | 'component', stanzaName: string): void {
   if (stanzaName !== 'message') return;
   console.error(
-    `[xmpp-gateway] outbound ${stanzaName} from ${fromJid.split('/')[0]} via ${via}`,
+    `[xmpp-gateway] outbound ${stanzaName} from ${bareJid(fromJid)} via ${via}`,
   );
 }

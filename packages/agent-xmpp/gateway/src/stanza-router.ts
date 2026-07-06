@@ -3,6 +3,7 @@ import type { Element } from '@xmpp/xml';
 import type { AgentMessage } from '@agent-xmpp/protocol';
 
 import { sendComposingForAgent } from './agent-send.js';
+import { bareJid } from './xep-plugins/jid.js';
 import type { GatewayConfig } from './config.js';
 import {
   pushFormResponseToBridge,
@@ -42,8 +43,8 @@ export class StanzaRouter {
     }
 
     const from = stanza.attrs.from as string;
-    const fromBare = from.split('/')[0];
-    const agentBare = agentJid.split('/')[0];
+    const fromBare = bareJid(from);
+    const agentBare = bareJid(agentJid);
     // C2S inbox receives agent self-sent stanzas (outbound loopback) — drop them.
     if (fromBare && agentBare && fromBare === agentBare) return;
     if (isAckOrReceiptStanza(stanza)) return;
