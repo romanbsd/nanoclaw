@@ -18,7 +18,7 @@ import { moduleApprovalsPendingApprovals } from './module-approvals-pending-appr
 import { moduleApprovalsTitleOptions } from './module-approvals-title-options.js';
 import { migration018 } from './018-approvals-approver-user-id.js';
 import { migration019 } from './019-wiring-threads.js';
-import { orchestratorMigration } from './019-agent-xmpp-orchestrator.js';
+import { migration099 } from './099-agent-xmpp-orchestrator.js';
 
 export interface Migration {
   version: number;
@@ -53,7 +53,7 @@ export const migrations: Migration[] = [
   migration015,
   migration016,
   migration019,
-  orchestratorMigration,
+  migration099,
 ];
 
 /** Row shape of PRAGMA foreign_key_check. Child rowids are stable across a

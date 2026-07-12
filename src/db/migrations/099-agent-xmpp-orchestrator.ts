@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 import type { Migration } from './index.js';
 
-export const migration019: Migration = {
-  version: 19,
+export const migration099: Migration = {
+  version: 99,
   name: 'agent-xmpp-orchestrator',
   up: (db: Database.Database) => {
     const cols = db.prepare("PRAGMA table_info('agent_groups')").all() as Array<{ name: string }>;
