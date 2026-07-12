@@ -12,7 +12,7 @@ import {
   shouldAcceptStanza,
   type InboundDeliveryContext,
 } from './delivery.js';
-import { Mailbox } from './mailbox.js';
+import type { GatewayRuntimeMailbox } from './runtime-mailbox.js';
 import {
   isAgentJid,
   resolveTargetAgentJid,
@@ -20,6 +20,7 @@ import {
 } from './xep-plugins/message.js';
 import { parseAskQuestionSubmit } from './xep-plugins/data-form.js';
 import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
+import { parseTaskInvocation } from './task-stanza-codec.js';
 
 export type SendStanzaFn = (stanza: Element) => Promise<void>;
 export type SendForAgentFn = (agentJid: string, stanza: Element) => Promise<void>;
@@ -27,7 +28,7 @@ export type SendForAgentFn = (agentJid: string, stanza: Element) => Promise<void
 export class StanzaRouter {
   constructor(
     private config: GatewayConfig,
-    private mailbox: Mailbox,
+    private mailbox: GatewayRuntimeMailbox,
     private sendForAgent: SendForAgentFn,
   ) {}
 
@@ -52,7 +53,7 @@ export class StanzaRouter {
     const formSubmit = parseAskQuestionSubmit(stanza);
     if (formSubmit) {
       const type = (stanza.attrs.type as string) || 'chat';
-      await pushFormResponseToBridge(this.config, {
+      await pushFormResponseToBridge(this.config, this.mailbox, {
         agentJid,
         from,
         stanzaType: type,
@@ -62,7 +63,17 @@ export class StanzaRouter {
       return;
     }
 
-    const agentMsg = stanzaToAgentMessage(stanza, this.config.agentDomain);
+    const task = parseTaskInvocation(stanza);
+    const agentMsg = task
+      ? {
+          id: task.taskId,
+          from: task.callerJid,
+          to: agentJid,
+          kind: 'task' as const,
+          contentType: 'application/json',
+          body: task,
+        }
+      : stanzaToAgentMessage(stanza, this.config.agentDomain);
     if (!agentMsg) return;
 
     const type = (stanza.attrs.type as string) || 'chat';
@@ -72,28 +83,14 @@ export class StanzaRouter {
     if (!shouldAcceptStanza(type, from, bodyText, agentNick)) return;
 
     const stanzaId = agentMsg.id;
-    const { id: deliveryId, isDuplicate, redelivered, status } = this.mailbox.enqueue(
-      stanzaId,
-      agentJid,
-      JSON.stringify(agentMsg),
-    );
-
-    if (isDuplicate) {
-      const alreadyDelivered = status === 'delivered' || status === 'acked';
-      // Truly-handled duplicate the host didn't ask to retry → drop it.
-      if (alreadyDelivered && !redelivered) return;
-      // Either the host requested redelivery, or a prior push never completed
-      // (status still 'pending'/'failed') — mark and fall through to (re)deliver.
-      this.mailbox.markRedelivered(stanzaId);
-    }
 
     const ctx: InboundDeliveryContext = {
       agentMsg,
       agentJid,
-      deliveryId,
+      deliveryId: stanzaId,
       stanzaType: type,
       from,
-      redelivered: isDuplicate,
+      redelivered: false,
     };
 
     void sendComposingForAgent(
@@ -113,24 +110,4 @@ export class StanzaRouter {
     }
   }
 
-  async redeliverRow(row: { id: string; stanzaId: string; agentJid: string; payload: string }): Promise<void> {
-    const agentMsg = JSON.parse(row.payload) as AgentMessage;
-    this.mailbox.markRedelivered(row.stanzaId);
-    await pushInboundToBridge(this.config, this.mailbox, {
-      agentMsg,
-      agentJid: row.agentJid,
-      deliveryId: row.id,
-      stanzaType: agentMsg.roomId ? 'groupchat' : 'chat',
-      from: agentMsg.from,
-      redelivered: true,
-    });
-  }
-
-  async sweepPending(): Promise<void> {
-    for (const row of this.mailbox.listForRedelivery()) {
-      await this.redeliverRow(row).catch((err) => {
-        console.error('[xmpp-gateway] redelivery failed:', row.stanzaId, err);
-      });
-    }
-  }
 }

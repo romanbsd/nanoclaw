@@ -34,8 +34,8 @@ export function agentMessageText(msg: AgentMessage): string {
 /** NanoClaw channel adapter inbound shape — preserves normative envelope. */
 export interface NanoclawXmppInbound {
   id: string;
-  kind: 'chat';
-  content: { text: string; envelope: InboundMessage };
+  kind: 'chat' | 'task';
+  content: { text?: string; prompt?: string; task?: unknown; envelope: InboundMessage };
   timestamp: string;
   isMention?: boolean;
   isGroup?: boolean;
@@ -43,10 +43,18 @@ export interface NanoclawXmppInbound {
 
 export function nanoclawInboundFromBridge(payload: BridgeInboundPayload): NanoclawXmppInbound {
   const { envelope, message } = payload;
+  const structuredTask = envelope.message.kind === 'task';
+  const text = agentMessageText(envelope.message);
   return {
     id: message.id,
-    kind: 'chat',
-    content: { text: agentMessageText(envelope.message), envelope },
+    kind: structuredTask ? 'task' : 'chat',
+    content: structuredTask
+      ? {
+          prompt: `Execute the inbound XMPP task. Use the task lifecycle tools and preserve taskId ${envelope.message.id}.`,
+          task: envelope.message.body,
+          envelope,
+        }
+      : { text, envelope },
     timestamp: envelope.delivery.receivedAt,
     isMention: message.isMention,
     isGroup: message.isGroup,

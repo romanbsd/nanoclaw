@@ -1,9 +1,8 @@
-import type { AgentMessage, BridgeFormResponsePayload, BridgeInboundPayload, BridgeWebhookPayload } from '@agent-xmpp/protocol';
+import type { AgentMessage, BridgeFormResponsePayload, BridgeInboundPayload } from '@agent-xmpp/protocol';
 import { agentMessageText } from '@agent-xmpp/protocol';
 
 import type { GatewayConfig } from './config.js';
-import type { Mailbox } from './mailbox.js';
-import { deliverToBridge } from './runtime-inbound.js';
+import type { GatewayRuntimeMailbox } from './runtime-mailbox.js';
 import { buildInboundEnvelope } from './xep-plugins/message.js';
 import { bareJid } from './xep-plugins/jid.js';
 import { mucRoomFromStanza } from './xep-plugins/muc.js';
@@ -86,11 +85,10 @@ export function buildBridgePayload(
 
 export async function pushInboundToBridge(
   config: GatewayConfig,
-  mailbox: Mailbox,
+  mailbox: GatewayRuntimeMailbox,
   ctx: InboundDeliveryContext,
 ): Promise<void> {
-  await deliverToBridge(config, buildBridgePayload(config, ctx));
-  mailbox.markDelivered(ctx.agentMsg.id);
+  await mailbox.deliverInbound(buildBridgePayload(config, ctx));
 }
 
 export interface FormResponseContext {
@@ -127,7 +125,8 @@ export function buildFormResponsePayload(
 
 export async function pushFormResponseToBridge(
   config: GatewayConfig,
+  mailbox: GatewayRuntimeMailbox,
   ctx: FormResponseContext,
 ): Promise<void> {
-  await deliverToBridge(config, buildFormResponsePayload(config, ctx));
+  await mailbox.deliverFormResponse(buildFormResponsePayload(config, ctx));
 }

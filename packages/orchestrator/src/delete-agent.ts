@@ -21,7 +21,6 @@ import { removeAgentGroupFolder } from './provision-nanoclaw-agent.js';
 
 export interface DeleteNanoclawAgentOptions {
   openfireClient?: OpenfireClient;
-  gatewayUrl?: string;
 }
 
 export async function deleteNanoclawAgent(
@@ -37,25 +36,6 @@ export async function deleteNanoclawAgent(
   if (!agentGroup) {
     deleteOrchestratorAgent(orchestratorId);
     return;
-  }
-
-  const gatewayUrl = (options.gatewayUrl || process.env.XMPP_GATEWAY_URL || 'http://127.0.0.1:9220').replace(
-    /\/$/,
-    '',
-  );
-
-  try {
-    await fetch(`${gatewayUrl}/v1/agents/unregister`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jid: record.xmpp_jid }),
-    });
-  // eslint-disable-next-line no-catch-all/no-catch-all -- best-effort unregister; agent is already being deleted
-  } catch (err) {
-    console.warn(
-      '[orchestrator] gateway agent unregister failed (best-effort):',
-      err instanceof Error ? err.message : err,
-    );
   }
 
   const client = options.openfireClient ?? new OpenfireClient(loadOpenfireConfigFromEnv());
@@ -94,6 +74,10 @@ export async function deleteNanoclawAgent(
   if (hasTable(getDb(), 'agent_destinations')) {
     // Must run before deleteAgentGroup — FK from agent_destinations → agent_groups.
     deleteAllDestinationsTouching(agentGroup.id);
+  }
+
+  if (hasTable(getDb(), 'xmpp_agent_apis')) {
+    getDb().prepare('DELETE FROM xmpp_agent_apis WHERE jid = ?').run(record.xmpp_jid);
   }
 
   deleteContainerConfig(agentGroup.id);

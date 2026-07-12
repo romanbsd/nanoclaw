@@ -52,4 +52,5 @@ docs/maintainer-guide.md
 docs/drafts/
 forks.md
 # MCP
-.codegraph
+.codegraph/
+.serena/

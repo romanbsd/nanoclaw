@@ -10,41 +10,13 @@ function shouldDelegateMail(prompt: string): boolean {
   return lower.includes('invoice') || lower.includes('new mail') || lower.includes('accounting review');
 }
 
-function delegationBody(prompt: string): string {
-  const match = prompt.match(/INV-\d+/i);
-  const ref = match ? match[0] : 'the invoice';
-  return `Please review ${ref} from the mail I received. Details: ${prompt.slice(0, 500)}`;
-}
-
 async function* scenarioEvents(scenario: string, prompt: string): AsyncGenerator<ProviderEvent> {
   yield { type: 'activity' };
   yield { type: 'init', continuation: `mock-session-${Date.now()}` };
   yield { type: 'activity' };
 
   if (scenario === 'secretary' && shouldDelegateMail(prompt)) {
-    yield {
-      type: 'tool_call',
-      tool: 'xmpp.discover_agents',
-      args: { capabilities: ['send_message'] },
-    };
-
-    const accountantJid = process.env.MOCK_ACCOUNTANT_JID;
-    if (!accountantJid) {
-      yield { type: 'result', text: 'No MOCK_ACCOUNTANT_JID configured — cannot delegate.' };
-      return;
-    }
-
-    yield {
-      type: 'tool_call',
-      tool: 'xmpp.send_message',
-      args: {
-        to: accountantJid,
-        kind: 'text',
-        contentType: 'text/plain',
-        body: delegationBody(prompt),
-      },
-    };
-    yield { type: 'result', text: `Delegated accounting task to ${accountantJid}.` };
+    yield { type: 'result', text: 'Mock scenarios no longer bypass the mailbox-backed MCP tool path.' };
     return;
   }
 

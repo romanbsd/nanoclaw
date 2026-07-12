@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { GROUPS_DIR } from '../../../src/config.js';
 import {
@@ -23,12 +22,11 @@ import {
 import { initGroupFilesystem } from '../../../src/group-init.js';
 import { normalizeName } from '../../../src/modules/agent-to-agent/db/agent-destinations.js';
 import type { AgentGroup, OrchestratorAgent } from '../../../src/types.js';
+import { XmppAgentGatewayStore } from '../../../src/modules/xmpp-agent-gateway/store.js';
+import type { AgentApiManifest } from '@agent-xmpp/protocol';
 import { provisionAgentIdentity } from './provision-identity.js';
 import { OpenfireClient, loadOpenfireConfigFromEnv, usernameFromJid } from './openfire-client.js';
 import type { OpenfireClientConfig } from './openfire-client.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = path.join(__dirname, '../../..');
 
 export interface McpServerSpec {
   name: string;
@@ -55,6 +53,8 @@ export interface ProvisionNanoclawAgentRequest {
   avatarUrl?: string;
   /** Extra env vars injected at container spawn (e.g. MOCK_ACCOUNTANT_JID). */
   spawnEnv?: Record<string, string>;
+  /** Structured API advertised by this logical agent. Defaults to conversation.respond. */
+  agentApiManifest?: Omit<AgentApiManifest, 'agent'> & { agent?: Partial<AgentApiManifest['agent']> };
 }
 
 export interface ProvisionNanoclawAgentResult {
@@ -70,10 +70,6 @@ function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function defaultXmppMcpPath(): string {
-  return path.join(REPO_ROOT, 'packages/agent-xmpp/mcp/dist/index.js');
-}
-
 function resolveFolder(agentId: string): string {
   const base = normalizeName(agentId) || 'agent';
   let folder = base;
@@ -85,75 +81,13 @@ function resolveFolder(agentId: string): string {
   return folder;
 }
 
-/** Containers reach the host gateway via host.docker.internal, not loopback. */
-function containerGatewayUrl(gatewayUrl: string): string {
-  try {
-    const url = new URL(gatewayUrl);
-    if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') {
-      url.hostname = 'host.docker.internal';
-      return url.toString().replace(/\/$/, '');
-    }
-    // eslint-disable-next-line no-catch-all/no-catch-all -- invalid gateway URL passed through unchanged
-  } catch {
-    // fall through
-  }
-  return gatewayUrl;
-}
-
-async function registerAgentIngress(gatewayUrl: string, jid: string, password: string): Promise<void> {
-  const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/v1/agents/register_inbox`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jid, password }),
-  });
-  if (!res.ok) {
-    throw new Error(`register agent ingress failed for ${jid}: ${res.status} ${await res.text()}`);
-  }
-}
-
-/** Seed gateway discovery before the container publishes its full runtime descriptor. */
-async function publishBootstrapDescriptor(
-  gatewayUrl: string,
-  jid: string,
-  tenantId: string,
-  provider: string,
-  model: string,
-): Promise<void> {
-  const res = await fetch(`${gatewayUrl.replace(/\/$/, '')}/v1/agents/publish_descriptor`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jid,
-      tenantId,
-      tools: [{ name: 'send_message', description: 'Send a message', inputSchema: { type: 'object' } }],
-      model,
-      provider,
-      softwareVersion: '2.0.0',
-      health: 'healthy',
-      availability: 'idle',
-      supportedProtocols: ['xmpp', 'mcp'],
-      publishedAt: new Date().toISOString(),
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`publish bootstrap descriptor failed for ${jid}: ${res.status} ${await res.text()}`);
-  }
-}
-
-function buildMcpServers(
-  specs: McpServerSpec[] | undefined,
-  gatewayUrl: string,
-): Record<string, { command: string; args?: string[]; env?: Record<string, string> }> {
+function buildMcpServers(specs: McpServerSpec[] | undefined): Record<string, { command: string; args?: string[]; env?: Record<string, string> }> {
   const servers: Record<string, { command: string; args?: string[]; env?: Record<string, string> }> = {};
-  const list = specs?.length
-    ? specs
-    : [{ name: 'xmpp', command: 'node', args: [defaultXmppMcpPath()] }];
-
-  for (const spec of list) {
+  for (const spec of specs ?? []) {
     servers[spec.name] = {
       command: spec.command,
       args: spec.args,
-      env: { XMPP_GATEWAY_URL: gatewayUrl, ...spec.env },
+      env: spec.env,
     };
   }
   return servers;
@@ -163,15 +97,12 @@ export interface ProvisionNanoclawAgentOptions {
   openfireClient?: OpenfireClient;
   openfireConfig?: OpenfireClientConfig;
   baseDomain?: string;
-  gatewayUrl?: string;
 }
 
 export async function provisionNanoclawAgent(
   request: ProvisionNanoclawAgentRequest,
   options: ProvisionNanoclawAgentOptions = {},
 ): Promise<ProvisionNanoclawAgentResult> {
-  const gatewayUrl = options.gatewayUrl || process.env.XMPP_GATEWAY_URL || 'http://127.0.0.1:9220';
-  const containerGateway = containerGatewayUrl(gatewayUrl);
   const baseDomain = options.baseDomain || request.tenantId;
 
   const identity = await provisionAgentIdentity(
@@ -229,7 +160,7 @@ export async function provisionNanoclawAgent(
       assistant_name: request.personality?.assistantName || request.displayName,
     });
     updateContainerConfigJson(agentGroupId, 'skills', request.skills ?? []);
-    updateContainerConfigJson(agentGroupId, 'mcp_servers', buildMcpServers(request.mcpServers, containerGateway));
+    updateContainerConfigJson(agentGroupId, 'mcp_servers', buildMcpServers(request.mcpServers));
 
     const mgId = generateId('mg');
     // One messaging_group per agent JID (instance=xmpp); re-use if orchestrator re-provisions same JID.
@@ -270,7 +201,6 @@ export async function provisionNanoclawAgent(
     // Injected into container spawn env; encodes XMPP identity + mock scenario knobs for agent-runner.
     const spawnEnv = {
       XMPP_AGENT_JID: identity.jid,
-      XMPP_GATEWAY_URL: containerGateway,
       XMPP_TENANT_ID: request.tenantId,
       ...(request.mockScenario ? { MOCK_SCENARIO: request.mockScenario } : {}),
       ...request.spawnEnv,
@@ -288,8 +218,33 @@ export async function provisionNanoclawAgent(
     createOrchestratorAgent(orchRow);
     rollback.push(() => deleteOrchestratorAgent(orchestratorId));
 
-    await registerAgentIngress(gatewayUrl, identity.jid, identity.password);
-    await publishBootstrapDescriptor(gatewayUrl, identity.jid, request.tenantId, provider, model ?? 'default');
+    const supplied = request.agentApiManifest;
+    const manifest: AgentApiManifest = {
+      specVersion: 'urn:businessos:agent-api:1',
+      capabilities: supplied?.capabilities ?? {
+        tools: { listChanged: true }, progress: true, cancellation: true, inputRequired: true, structuredOutput: true,
+      },
+      operations: supplied?.operations ?? [{
+        name: 'conversation.respond',
+        description: 'Ask this agent to handle a conversational request.',
+        inputSchema: {
+          type: 'object', properties: { message: { type: 'string' } }, required: ['message'], additionalProperties: false,
+        },
+        outputSchema: {
+          type: 'object', properties: { response: { type: 'string' } }, required: ['response'], additionalProperties: false,
+        },
+      }],
+      agent: {
+        jid: identity.jid,
+        name: supplied?.agent?.name ?? request.agentId,
+        title: supplied?.agent?.title ?? request.displayName,
+        description: supplied?.agent?.description,
+        version: supplied?.agent?.version ?? '1.0.0',
+        vendor: supplied?.agent?.vendor,
+        homepage: supplied?.agent?.homepage,
+      },
+    };
+    new XmppAgentGatewayStore().registerManifest(manifest, request.tenantId);
 
     return {
       orchestratorId,

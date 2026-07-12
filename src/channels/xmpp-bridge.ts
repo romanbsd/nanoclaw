@@ -1,248 +1,184 @@
-/**
- * XMPP channel bridge — thin ChannelAdapter that forwards to agent-xmpp-gateway.
- *
- * Gateway pushes inbound stanzas via webhook; bridge calls host onInboundEvent()
- * with recipient agent JID in `instance`. Outbound deliver() posts to gateway HTTP API.
- */
-import http from 'http';
-
-import { getAskQuestionRender } from '../db/sessions.js';
-import { readEnvFile } from '../env.js';
-import { log } from '../log.js';
-import { registerChannelAdapter } from './channel-registry.js';
-import { resolveAskQuestionSelection } from './ask-question.js';
+/** XMPP channel plugin backed directly by NanoClaw session mailboxes. */
+import {
+  AGENT_API_NS,
+  AGENT_DIRECTORY_NS,
+  DISCO_INFO_NS,
+  DISCO_ITEMS_NS,
+  MCP_ENDPOINT_NS,
+  EmbeddedXmppGateway,
+  buildAgentDirectory,
+  buildAgentInfo,
+  buildGatewayInfo,
+  buildManifestRegistrationResult,
+  buildOperationInfo,
+  buildOperationItems,
+  buildSchemaResult,
+  buildPingResponse,
+  isPingRequest,
+  loadConfig,
+  operationFromNode,
+  parseManifestRegistration,
+  type Element,
+  type GatewayRuntimeMailbox,
+} from '@agent-xmpp/gateway';
 import {
   isBridgeFormResponsePayload,
   nanoclawInboundFromBridge,
-  type BridgeWebhookPayload,
+  type BridgeFormResponsePayload,
+  type BridgeInboundPayload,
 } from '@agent-xmpp/protocol';
+
+import { getAskQuestionRender } from '../db/sessions.js';
+import { getAgentGroupByXmppJid } from '../db/agent-groups.js';
+import { getOrchestratorAgentByGroupId } from '../db/orchestrator-agents.js';
+import { log } from '../log.js';
+import { XmppAgentGatewayStore } from '../modules/xmpp-agent-gateway/store.js';
+import { resolveAskQuestionSelection } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
-
-const DEFAULT_GATEWAY = 'http://127.0.0.1:9220';
-const DEFAULT_WEBHOOK_PORT = 9221;
-
-const XMPP_ENV_KEYS = [
-  'XMPP_GATEWAY_URL',
-  'XMPP_BRIDGE_WEBHOOK_SECRET',
-  'XMPP_BRIDGE_WEBHOOK_PORT',
-  'XMPP_DEFAULT_AGENT_JID',
-] as const;
-
-function xmppEnv(): Record<string, string> {
-  return readEnvFile([...XMPP_ENV_KEYS]);
-}
-
-function gatewayUrl(): string {
-  return process.env.XMPP_GATEWAY_URL || xmppEnv().XMPP_GATEWAY_URL || DEFAULT_GATEWAY;
-}
-
-function webhookSecret(): string {
-  return process.env.XMPP_BRIDGE_WEBHOOK_SECRET || xmppEnv().XMPP_BRIDGE_WEBHOOK_SECRET || 'dev-secret';
-}
-
-function webhookPort(): number {
-  const raw =
-    process.env.XMPP_BRIDGE_WEBHOOK_PORT || xmppEnv().XMPP_BRIDGE_WEBHOOK_PORT || String(DEFAULT_WEBHOOK_PORT);
-  return Number(raw);
-}
-
-async function gatewayPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${gatewayUrl()}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`XMPP gateway ${path} failed: ${res.status} ${text}`);
-  }
-  return (await res.json()) as T;
-}
-
-async function sendTypingToGateway(
-  platformId: string,
-  threadId: string | null,
-  fromJid: string,
-  state: 'composing' | 'paused' = 'composing',
-): Promise<void> {
-  await gatewayPost('/v1/outbound/typing', {
-    from: fromJid,
-    to: platformId,
-    threadId,
-    state,
-  });
-}
-
-async function deliverToGateway(
-  platformId: string,
-  threadId: string | null,
-  message: OutboundMessage,
-  fromJid: string,
-): Promise<string | undefined> {
-  const content =
-    typeof message.content === 'string'
-      ? message.content
-      : (message.content as { text?: string })?.text || message.content;
-
-  const files = message.files?.map((f) => ({
-    filename: f.filename,
-    dataBase64: f.data.toString('base64'),
-    mediaType: 'application/octet-stream',
-  }));
-
-  const json = await gatewayPost<{ messageId?: string }>('/v1/outbound/deliver', {
-    from: fromJid,
-    to: platformId,
-    threadId,
-    content,
-    files,
-  });
-  return json.messageId;
-}
+import { registerChannelAdapter } from './channel-registry.js';
 
 function createAdapter(): ChannelAdapter | null {
-  const secret = webhookSecret();
-  const fallbackFromJid = process.env.XMPP_DEFAULT_AGENT_JID || xmppEnv().XMPP_DEFAULT_AGENT_JID || '';
+  if (!process.env.XMPP_COMPONENT_JID || !process.env.XMPP_COMPONENT_SECRET) return null;
 
-  let hostOnInboundEvent: ChannelSetup['onInboundEvent'] | null = null;
-  let hostOnAction: ChannelSetup['onAction'] | null = null;
-  let server: http.Server | null = null;
-  let connected = false;
+  let gateway: EmbeddedXmppGateway | null = null;
+  let setup: ChannelSetup | null = null;
+  const store = new XmppAgentGatewayStore();
+  const gatewayConfig = loadConfig();
 
-  async function handleFormResponse(payload: Extract<BridgeWebhookPayload, { type: 'form_response' }>): Promise<void> {
-    const render = getAskQuestionRender(payload.questionId);
-    const selectedOption = resolveAskQuestionSelection(render, payload.selectedIndex);
-    const title = render?.title ?? 'Question';
-    const matched = render?.options[payload.selectedIndex];
-    const selectedLabel = matched?.selectedLabel ?? selectedOption;
+  function tenantForSender(sender: string): string {
+    const group = getAgentGroupByXmppJid(sender.split('/')[0] ?? sender);
+    return group ? (getOrchestratorAgentByGroupId(group.id)?.tenant_id ?? 'default') : 'default';
+  }
 
-    try {
-      await gatewayPost('/v1/outbound/deliver', {
+  function handleIq(stanza: Element): Element | null {
+    const from = String(stanza.attrs.from ?? '');
+    const to = String(stanza.attrs.to ?? '').split('/')[0] ?? '';
+    const info = stanza.getChild('query', DISCO_INFO_NS);
+    const items = stanza.getChild('query', DISCO_ITEMS_NS);
+    const schema = stanza.getChild('schema', AGENT_API_NS);
+    const tenant = tenantForSender(from);
+    if (isPingRequest(stanza) && (to === gatewayConfig.componentJid || store.getAgent(to))) {
+      return buildPingResponse(stanza);
+    }
+    const registration = parseManifestRegistration(stanza);
+    if (registration) {
+      const sender = from.split('/')[0] ?? from;
+      if (registration.agent.jid !== sender) return null;
+      return buildManifestRegistrationResult(stanza, store.registerManifest(registration, tenant));
+    }
+    if (info && to === gatewayConfig.componentJid) return buildGatewayInfo(stanza, gatewayConfig.componentJid);
+    if (items?.attrs.node === AGENT_DIRECTORY_NS && to === gatewayConfig.componentJid) {
+      return buildAgentDirectory(stanza, gatewayConfig.componentJid, store.listAgents(tenant));
+    }
+    const agent = store.getAgent(to);
+    if (!agent || agent.tenantId !== tenant) return null;
+    if (info?.attrs.node === MCP_ENDPOINT_NS) return buildAgentInfo(stanza, agent);
+    if (items?.attrs.node === AGENT_API_NS) return buildOperationItems(stanza, agent);
+    if (info?.attrs.node) {
+      const operationName = operationFromNode(String(info.attrs.node));
+      const operation = agent.operations.find((item) => item.name === operationName);
+      if (operation) return buildOperationInfo(stanza, agent, operation);
+    }
+    if (schema) {
+      const operation = agent.operations.find((item) => item.name === schema.attrs.operation);
+      const direction = schema.attrs.direction;
+      if (operation && (direction === 'input' || direction === 'output')) {
+        return buildSchemaResult(stanza, agent, operation, direction);
+      }
+    }
+    return null;
+  }
+
+  const mailbox: GatewayRuntimeMailbox = {
+    async deliverInbound(payload: BridgeInboundPayload) {
+      if (!setup) throw new Error('XMPP adapter is not initialized');
+      const inbound = nanoclawInboundFromBridge(payload);
+      await setup.onInboundEvent({
+        channelType: 'xmpp',
+        instance: payload.agentJid,
+        platformId: payload.platformId,
+        threadId: payload.threadId,
+        message: {
+          id: inbound.id,
+          kind: inbound.kind,
+          content: JSON.stringify(inbound.content),
+          timestamp: inbound.timestamp,
+          isMention: inbound.isMention ?? true,
+          isGroup: inbound.isGroup,
+        },
+      });
+    },
+
+    async deliverFormResponse(payload: BridgeFormResponsePayload) {
+      if (!setup || !gateway || !isBridgeFormResponsePayload(payload)) return;
+      const render = getAskQuestionRender(payload.questionId);
+      const selectedOption = resolveAskQuestionSelection(render, payload.selectedIndex);
+      const selectedLabel = render?.options[payload.selectedIndex]?.selectedLabel ?? selectedOption;
+      await gateway.deliver({
         from: payload.agentJid,
         to: payload.platformId,
-        threadId: payload.threadId,
-        content: `${title}\n\n${selectedLabel}`,
+        threadId: payload.threadId ?? undefined,
+        content: `${render?.title ?? 'Question'}\n\n${selectedLabel}`,
       });
-    } catch (err) {
-      log.warn('Failed to send XMPP form selection confirmation', { questionId: payload.questionId, err });
-    }
-
-    hostOnAction!(payload.questionId, selectedOption, payload.userId);
-  }
+      setup.onAction(payload.questionId, selectedOption, payload.userId);
+    },
+  };
 
   return {
     name: 'XMPP',
     channelType: 'xmpp',
     supportsThreads: true,
 
-    async setup(config) {
-      hostOnInboundEvent = config.onInboundEvent;
-      hostOnAction = config.onAction;
-
-      server = http.createServer((req, res) => {
-        if (req.method !== 'POST' || req.url !== '/internal/xmpp/inbound') {
-          res.writeHead(404);
-          res.end();
-          return;
-        }
-
-        const auth = req.headers.authorization || '';
-        if (auth !== `Bearer ${secret}`) {
-          res.writeHead(401);
-          res.end('Unauthorized');
-          return;
-        }
-
-        const chunks: Buffer[] = [];
-        req.on('data', (c) => chunks.push(c));
-        req.on('end', () => {
-          void (async () => {
-            try {
-              const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as BridgeWebhookPayload;
-
-              if (isBridgeFormResponsePayload(body)) {
-                await handleFormResponse(body);
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ ok: true }));
-                return;
-              }
-
-              const inbound = nanoclawInboundFromBridge(body);
-              await hostOnInboundEvent!({
-                channelType: 'xmpp',
-                instance: body.agentJid,
-                platformId: body.platformId,
-                threadId: body.threadId,
-                message: {
-                  id: inbound.id,
-                  kind: inbound.kind,
-                  content: JSON.stringify(inbound.content),
-                  timestamp: inbound.timestamp,
-                  isMention: inbound.isMention ?? true,
-                  isGroup: inbound.isGroup,
-                },
-              });
-              res.writeHead(200, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ ok: true }));
-            } catch (err) {
-              log.error('XMPP bridge inbound error', { err });
-              res.writeHead(500);
-              res.end('Internal error');
-            }
-          })();
-        });
-      });
-
-      await new Promise<void>((resolve, reject) => {
-        server!.listen(webhookPort(), '127.0.0.1', () => resolve());
-        server!.on('error', reject);
-      });
-
-      connected = true;
-      log.info('XMPP bridge listening', { port: webhookPort(), gateway: gatewayUrl() });
+    async setup(channelSetup) {
+      setup = channelSetup;
+      gateway = new EmbeddedXmppGateway(gatewayConfig, mailbox, handleIq);
+      await gateway.start();
+      log.info('Embedded XMPP gateway started');
     },
 
     async teardown() {
-      connected = false;
-      if (server) {
-        await new Promise<void>((resolve) => server!.close(() => resolve()));
-        server = null;
-      }
+      const running = gateway;
+      gateway = null;
+      setup = null;
+      if (running) await running.stop();
     },
 
     isConnected() {
-      return connected;
+      return gateway?.isConnected() === true;
     },
 
-    async setTyping(platformId: string, threadId: string | null, fromJid?: string) {
-      const senderJid = fromJid || fallbackFromJid;
-      if (!senderJid) {
-        log.debug('XMPP setTyping skipped — no fromJid');
-        return;
-      }
-      try {
-        await sendTypingToGateway(platformId, threadId, senderJid, 'composing');
-      } catch (err) {
-        log.debug('XMPP typing indicator failed (best-effort)', { platformId, threadId, err });
-      }
+    async setTyping(platformId, threadId, fromJid) {
+      if (gateway && fromJid) await gateway.setTyping(fromJid, platformId, threadId, 'composing');
     },
 
-    async clearTyping(platformId: string, threadId: string | null, fromJid?: string) {
-      const senderJid = fromJid || fallbackFromJid;
-      if (!senderJid) return;
-      try {
-        await sendTypingToGateway(platformId, threadId, senderJid, 'paused');
-      } catch (err) {
-        log.debug('XMPP clear typing failed (best-effort)', { platformId, threadId, err });
-      }
+    async clearTyping(platformId, threadId, fromJid) {
+      if (gateway && fromJid) await gateway.setTyping(fromJid, platformId, threadId, 'paused');
     },
 
-    async deliver(platformId, threadId, message, options) {
-      const fromJid = options?.fromJid || fallbackFromJid;
-      if (!fromJid) {
-        throw new Error('XMPP deliver requires fromJid (set XMPP_DEFAULT_AGENT_JID or provision agent xmpp_jid)');
+    async deliver(platformId, threadId, message: OutboundMessage, options) {
+      if (!gateway) throw new Error('XMPP gateway is not connected');
+      const from = options?.fromJid || process.env.XMPP_DEFAULT_AGENT_JID;
+      if (!from) throw new Error('XMPP delivery requires an agent JID');
+      const content =
+        typeof message.content === 'string'
+          ? message.content
+          : ((message.content as { text?: string })?.text ?? message.content);
+      if (content && typeof content === 'object' && 'agentTask' in content) {
+        return gateway.deliverTask(
+          (content as { agentTask: import('@agent-xmpp/protocol').AgentTaskRecord }).agentTask,
+        );
       }
-      return deliverToGateway(platformId, threadId, message, fromJid);
+      return gateway.deliver({
+        from,
+        to: platformId,
+        threadId: threadId ?? undefined,
+        content,
+        files: message.files?.map((file) => ({
+          filename: file.filename,
+          dataBase64: file.data.toString('base64'),
+          mediaType: 'application/octet-stream',
+        })),
+      });
     },
 
     async resolveChannelName(platformId) {
@@ -251,11 +187,4 @@ function createAdapter(): ChannelAdapter | null {
   };
 }
 
-registerChannelAdapter('xmpp', {
-  factory: createAdapter,
-  containerConfig: {
-    env: {
-      XMPP_GATEWAY_URL: process.env.XMPP_GATEWAY_URL || 'http://host.docker.internal:9220',
-    },
-  },
-});
+registerChannelAdapter('xmpp', { factory: createAdapter });

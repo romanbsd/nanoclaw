@@ -34,11 +34,6 @@ import { ensureMemoryScaffold } from './memory-scaffold.js';
 import './providers/index.js';
 import { createProvider, type ProviderName } from './providers/factory.js';
 import { runPollLoop } from './poll-loop.js';
-import {
-  fetchPeerAgentsSection,
-  publishOfflineDescriptor,
-  publishRuntimeDescriptor,
-} from './xmpp-runtime-descriptor.js';
 
 function log(msg: string): void {
   console.error(`[agent-runner] ${msg}`);
@@ -111,42 +106,6 @@ async function main(): Promise<void> {
   // boot (idempotent). Default off — the trunk default (Claude) omits the flag
   // and keeps its native memory untouched.
   if (provider.usesMemoryScaffold) ensureMemoryScaffold();
-
-  const descriptorInput = {
-    jid: process.env.XMPP_AGENT_JID || '',
-    tenantId: process.env.XMPP_TENANT_ID,
-    provider: providerName,
-    model: config.model || 'default',
-    sessionId: config.agentGroupId || undefined,
-  };
-
-  if (process.env.XMPP_GATEWAY_URL && descriptorInput.jid) {
-    try {
-      await publishRuntimeDescriptor(descriptorInput);
-    } catch (err) {
-      log(`Runtime descriptor publish failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
-
-    const peerSection = await fetchPeerAgentsSection(process.env.XMPP_GATEWAY_URL, descriptorInput.jid);
-    if (peerSection) {
-      instructions = `${instructions}\n\n${peerSection}`;
-    }
-
-    // Publish an offline descriptor on shutdown. Installing a signal listener
-    // suppresses the runtime's default terminate-on-signal, so the handler MUST
-    // call process.exit() itself — otherwise the container ignores the SIGTERM
-    // from `docker stop -t 1` and hangs until Docker escalates to SIGKILL.
-    // Gated on XMPP config so non-XMPP containers keep default signal handling.
-    let shuttingDown = false;
-    const shutdownDescriptor = async () => {
-      if (shuttingDown) return;
-      shuttingDown = true;
-      await publishOfflineDescriptor(descriptorInput); // never throws (catches internally)
-      process.exit(0);
-    };
-    process.on('SIGTERM', shutdownDescriptor);
-    process.on('SIGINT', shutdownDescriptor);
-  }
 
   await runPollLoop({
     provider,

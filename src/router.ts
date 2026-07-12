@@ -187,7 +187,8 @@ async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
     return true;
   }
 
-  const bodyText = safeParseContent(event.message.content).text ?? '';
+  const parsedContent = safeParseContent(event.message.content) as { text?: string; prompt?: string };
+  const bodyText = parsedContent.text ?? parsedContent.prompt ?? '';
   if (!bodyText.trim()) {
     log.debug('XMPP inbound empty body skipped', { recipientJid, from: event.platformId });
     return true;

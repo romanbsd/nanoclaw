@@ -181,3 +181,26 @@ export function findQuestionResponse(questionId: string): MessageInRow | undefin
     inbound.close();
   }
 }
+
+/** Find a host response for an outbound system-action request. */
+export function findSystemResponse(requestId: string): MessageInRow | undefined {
+  const inbound = openInboundDb();
+  const outbound = getOutboundDb();
+  try {
+    const rows = inbound
+      .prepare("SELECT * FROM messages_in WHERE status = 'pending' AND kind = 'system' ORDER BY seq")
+      .all() as MessageInRow[];
+    for (const row of rows) {
+      if (outbound.prepare('SELECT 1 FROM processing_ack WHERE message_id = ?').get(row.id)) continue;
+      try {
+        const content = JSON.parse(row.content) as { requestId?: string };
+        if (content.requestId === requestId) return row;
+      } catch {
+        // Ignore malformed system rows; they belong to a different handler.
+      }
+    }
+    return undefined;
+  } finally {
+    inbound.close();
+  }
+}

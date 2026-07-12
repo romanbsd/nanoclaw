@@ -64,7 +64,6 @@ describe('provisionNanoclawAgent', () => {
       {
         openfireClient: mockClient as unknown as OpenfireClient,
         baseDomain: 'example.org',
-        gatewayUrl: 'http://127.0.0.1:9220',
       },
     );
 
@@ -80,7 +79,7 @@ describe('provisionNanoclawAgent', () => {
     const config = getContainerConfig(result.agentGroupId);
     expect(config?.provider).toBe('mock');
     expect(config?.model).toBe('mock');
-    expect(JSON.parse(config!.mcp_servers)).toHaveProperty('xmpp');
+    expect(JSON.parse(config!.mcp_servers)).toEqual({});
 
     const mg = getMessagingGroupByPlatform('xmpp', result.jid, 'xmpp');
     expect(mg).toBeDefined();
@@ -90,16 +89,14 @@ describe('provisionNanoclawAgent', () => {
     expect(orch?.mock_scenario).toBe('accountant');
     const spawnEnv = JSON.parse(orch!.spawn_env) as Record<string, string>;
     expect(spawnEnv.XMPP_AGENT_JID).toBe(result.jid);
+    expect(spawnEnv.XMPP_GATEWAY_URL).toBeUndefined();
     expect(spawnEnv.MOCK_SCENARIO).toBe('accountant');
     expect(spawnEnv.MOCK_ACCOUNTANT_JID).toBe('other@example.org');
 
     removeAgentGroupFolder(result.folder);
   });
 
-  it('rolls back all state and deletes the xmpp user when a gateway call fails', async () => {
-    // Gateway is down: registerAgentIngress (the first fetch after the DB writes) rejects.
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('ECONNREFUSED')));
-
+  it('rolls back all state and deletes the xmpp user when manifest registration fails', async () => {
     await expect(
       provisionNanoclawAgent(
         {
@@ -109,14 +106,22 @@ describe('provisionNanoclawAgent', () => {
           displayName: 'Fail Agent',
           provider: 'mock',
           model: 'mock',
+          agentApiManifest: {
+            specVersion: 'urn:businessos:agent-api:1',
+            capabilities: {},
+            operations: [{
+              name: 'broken',
+              description: 'Invalid non-object input root.',
+              inputSchema: { type: 'string' },
+            }],
+          },
         },
         {
           openfireClient: mockClient as unknown as OpenfireClient,
           baseDomain: 'example.org',
-          gatewayUrl: 'http://127.0.0.1:9220',
         },
       ),
-    ).rejects.toThrow('ECONNREFUSED');
+    ).rejects.toThrow('inputSchema must have an object root');
 
     // No leaked rows.
     expect(getAgentGroupByFolder('fail-agent')).toBeUndefined();

@@ -1,13 +1,10 @@
 # Remove XMPP Channel
 
-Reverse every change from `/add-xmpp`:
+1. Remove the XMPP imports from `src/channels/index.ts`, `src/modules/index.ts`, and both container MCP-tool barrels.
+2. Delete `src/channels/xmpp-bridge.ts`, `src/modules/xmpp-agent-gateway/`, the XMPP migration, and XMPP container tool/instructions.
+3. Remove `@agent-xmpp/gateway` and `@agent-xmpp/protocol` from the root dependencies.
+4. Remove the XMPP environment keys from `.env`.
+5. Optionally delete `packages/agent-xmpp/{gateway,protocol}/` and XMPP-specific orchestrator files.
+6. Run `pnpm install`, `pnpm run build`, and restart NanoClaw.
 
-1. Unload gateway service (`launchctl unload` / `systemctl --user stop nanoclaw-xmpp-gateway`)
-2. Remove XMPP env keys from `.env`
-3. Remove `import './xmpp-bridge.js';` from `src/channels/index.ts`
-4. Delete `src/channels/xmpp-bridge.ts` and `src/channels/xmpp-bridge-registration.test.ts`
-5. Remove MCP server from container config: `ncl groups config remove-mcp-server --id <group> --name xmpp`
-6. Rebuild: `pnpm run build`
-7. Restart NanoClaw service
-
-Optional: remove `packages/agent-xmpp/` if no longer needed.
+Existing agent-group and session rows are not deleted automatically. Remove provisioned XMPP agents through the orchestrator first when their data should also be removed.

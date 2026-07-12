@@ -23,7 +23,7 @@ export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHan
   const stanzaHandlers: Array<(stanza: Element) => void> = [];
 
   xmpp.on('stanza', (stanza: Element) => {
-    if (stanza.name === 'iq' && stanza.attrs.type === 'get' && onIqGet) {
+    if (stanza.name === 'iq' && onIqGet) {
       const response = onIqGet(stanza);
       if (response) {
         xmpp.send(response).catch((err) => {

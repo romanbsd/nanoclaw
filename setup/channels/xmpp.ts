@@ -1,8 +1,6 @@
 /**
  * XMPP channel flow for setup:auto (minimal MVP).
  */
-import crypto from 'crypto';
-
 import * as p from '@clack/prompts';
 import k from 'kleur';
 
@@ -13,7 +11,7 @@ import { note } from '../lib/theme.js';
 export async function runXmppChannel(displayName: string): Promise<ChannelFlowResult> {
   note(
     [
-      'XMPP uses an external component gateway (Openfire/ejabberd/Prosody).',
+      'XMPP uses an embedded external-component plugin (Openfire/ejabberd/Prosody).',
       '',
       'You need:',
       '  1. Component JID + secret registered on your XMPP server',
@@ -53,10 +51,6 @@ export async function runXmppChannel(displayName: string): Promise<ChannelFlowRe
         XMPP_DEFAULT_AGENT_JID: agentJid,
         XMPP_AGENT_DOMAIN: agentJid.split('@')[1] || '',
         XMPP_COMPONENT_SERVICE: 'xmpp://127.0.0.1:5275',
-        XMPP_GATEWAY_URL: 'http://127.0.0.1:9220',
-        XMPP_BRIDGE_WEBHOOK_SECRET: crypto.randomUUID(),
-        XMPP_BRIDGE_WEBHOOK_URL: 'http://127.0.0.1:9221/internal/xmpp/inbound',
-        XMPP_BRIDGE_WEBHOOK_PORT: '9221',
       },
       extraFields: { AGENT_JID: agentJid, DISPLAY_NAME: displayName },
     },
@@ -68,8 +62,8 @@ export async function runXmppChannel(displayName: string): Promise<ChannelFlowRe
 
   note(
     [
-      `Start the gateway: pnpm --filter @agent-xmpp/gateway start`,
-      `Send an XMPP message to ${agentJid} and wire via /manage-channels.`,
+      `Restart NanoClaw, then send an XMPP message to ${agentJid}.`,
+      `Provision additional logical agents through the orchestrator.`,
     ].join('\n'),
     'Next steps',
   );

@@ -14,7 +14,6 @@ export interface OrchestratorServerOptions {
   host?: string;
   apiSecret?: string;
   openfireClient?: OpenfireClient;
-  gatewayUrl?: string;
 }
 
 function checkAuth(authHeader: string | undefined, secret: string | undefined): boolean {
@@ -89,7 +88,6 @@ export async function createOrchestratorServer(options: OrchestratorServerOption
     try {
       const result = await provisionNanoclawAgent(req.body, {
         openfireClient: options.openfireClient,
-        gatewayUrl: options.gatewayUrl,
         baseDomain: req.body.tenantId,
       });
       return reply.status(201).send({
@@ -110,7 +108,6 @@ export async function createOrchestratorServer(options: OrchestratorServerOption
     try {
       await deleteNanoclawAgent(req.params.id, {
         openfireClient: options.openfireClient,
-        gatewayUrl: options.gatewayUrl,
       });
       return reply.status(204).send();
       // eslint-disable-next-line no-catch-all/no-catch-all -- map delete errors to HTTP 4xx

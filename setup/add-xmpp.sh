@@ -29,7 +29,6 @@ pnpm install >&2
 log "Building agent-xmpp packages…"
 pnpm --filter @agent-xmpp/protocol build >&2
 pnpm --filter @agent-xmpp/gateway build >&2
-pnpm --filter @agent-xmpp/mcp build >&2
 
 if ! grep -q "^import './xmpp-bridge.js';" src/channels/index.ts 2>/dev/null; then
   echo "import './xmpp-bridge.js';" >> src/channels/index.ts
@@ -41,7 +40,7 @@ pnpm run build >&2
 # Persist env keys to .env
 touch .env
 for key in XMPP_COMPONENT_JID XMPP_AGENT_DOMAIN XMPP_COMPONENT_SERVICE XMPP_COMPONENT_SECRET \
-  XMPP_DEFAULT_AGENT_JID XMPP_GATEWAY_URL XMPP_BRIDGE_WEBHOOK_SECRET XMPP_BRIDGE_WEBHOOK_URL XMPP_BRIDGE_WEBHOOK_PORT; do
+  XMPP_DEFAULT_AGENT_JID; do
   val="${!key:-}"
   [ -z "$val" ] && continue
   if grep -q "^${key}=" .env; then
