@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 import assert from 'node:assert/strict';
 
-import type { AgentApiManifest, BridgeFormResponsePayload, BridgeInboundPayload, RegisteredAgent } from '@agent-xmpp/protocol';
+import type { AgentApiManifest, BridgeFormResponsePayload, BridgeInboundPayload } from '@agent-xmpp/protocol';
 import {
   AGENT_API_NS,
   AGENT_DIRECTORY_NS,
@@ -11,25 +11,26 @@ import {
   MCP_ENDPOINT_NS,
   EmbeddedXmppGateway,
   PING_NS,
-  buildAgentDirectory,
-  buildAgentInfo,
-  buildGatewayInfo,
-  buildOperationInfo,
-  buildOperationItems,
-  buildPingResponse,
-  buildSchemaResult,
-  isPingRequest,
+  buildTaskInvocation,
   operationFromNode,
+  parseTaskEvent,
+  type ParsedTaskInvocation,
+  type TaskWireEvent,
   type GatewayRuntimeMailbox,
 } from '@agent-xmpp/gateway';
 import { xml, type Element } from '@xmpp/xml';
 
+import { closeDb, getDb, initTestDb, runMigrations } from '../../../src/db/index.js';
+import { XmppAgentGatewayStore } from '../../../src/modules/xmpp-agent-gateway/store.js';
+import { createXmppAgentIqHandler } from '../../../src/channels/xmpp-agent-iq.js';
 import { runOpenfireBootstrap, startOpenfireOnly, stopOpenfireOnly } from './e2e-stack.js';
 import { XmppSession } from './xmpp-session.js';
 
 class MailboxSpy implements GatewayRuntimeMailbox {
   readonly inbound: BridgeInboundPayload[] = [];
   readonly forms: BridgeFormResponsePayload[] = [];
+  readonly taskInvocations: ParsedTaskInvocation[] = [];
+  readonly taskEvents: TaskWireEvent[] = [];
   private waiters: Array<() => void> = [];
 
   async deliverInbound(payload: BridgeInboundPayload): Promise<void> {
@@ -39,6 +40,16 @@ class MailboxSpy implements GatewayRuntimeMailbox {
 
   async deliverFormResponse(payload: BridgeFormResponsePayload): Promise<void> {
     this.forms.push(payload);
+  }
+
+  async deliverTaskInvocation(task: ParsedTaskInvocation): Promise<void> {
+    this.taskInvocations.push(task);
+    this.waiters.splice(0).forEach((resolve) => resolve());
+  }
+
+  async deliverTaskEvent(event: TaskWireEvent): Promise<void> {
+    this.taskEvents.push(event);
+    this.waiters.splice(0).forEach((resolve) => resolve());
   }
 
   async waitForInbound(count: number, timeoutMs = 15_000): Promise<void> {
@@ -55,10 +66,26 @@ class MailboxSpy implements GatewayRuntimeMailbox {
       });
     }
   }
+
+  async waitForTaskInvocation(timeoutMs = 15_000): Promise<ParsedTaskInvocation> {
+    const deadline = Date.now() + timeoutMs;
+    while (!this.taskInvocations[0]) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error('timeout waiting for task invocation');
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('timeout waiting for task invocation')), remaining);
+        this.waiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    return this.taskInvocations[0];
+  }
 }
 
-function registered(jid: string, name: string): RegisteredAgent {
-  const manifest: AgentApiManifest = {
+function manifest(jid: string, name: string): AgentApiManifest {
+  return {
     specVersion: AGENT_API_NS,
     agent: { jid, name, title: name, description: `${name} integration agent`, version: '1.0.0' },
     capabilities: { tools: { listChanged: false }, progress: true, cancellation: true, inputRequired: true, structuredOutput: true },
@@ -71,18 +98,6 @@ function registered(jid: string, name: string): RegisteredAgent {
       annotations: { readOnlyHint: true, idempotentHint: true },
     }],
   };
-  return {
-    manifest,
-    manifestDigest: `digest-${name}`,
-    availability: 'available',
-    tenantId: 'integration-tenant',
-    registeredAt: new Date().toISOString(),
-    operations: [{
-      ...manifest.operations[0],
-      inputSchemaDigest: `input-${name}`,
-      outputSchemaDigest: `output-${name}`,
-    }],
-  };
 }
 
 function child(stanza: Element, name: string, xmlns: string): Element | undefined {
@@ -90,50 +105,27 @@ function child(stanza: Element, name: string, xmlns: string): Element | undefine
 }
 
 async function main(): Promise<void> {
+  initTestDb();
+  runMigrations(getDb());
   const config = await startOpenfireOnly();
   const componentJid = config.gatewayJid;
-  const agents = [registered(`alpha@${componentJid}`, 'alpha'), registered(`beta@${componentJid}`, 'beta')];
+  const store = new XmppAgentGatewayStore();
+  const agents = [
+    store.registerManifest(manifest(`alpha@${componentJid}`, 'alpha'), 'integration-tenant'),
+    store.registerManifest(manifest(`beta@${componentJid}`, 'beta'), 'integration-tenant'),
+  ];
   const mailbox = new MailboxSpy();
-  const iqHandler = (stanza: Element): Element | null => {
-    if (isPingRequest(stanza) && [componentJid, ...agents.map((a) => a.manifest.agent.jid)].includes(String(stanza.attrs.to))) {
-      return buildPingResponse(stanza);
-    }
-    const query = stanza.getChild('query');
-    const to = String(stanza.attrs.to ?? '').split('/')[0];
-    if (stanza.attrs.type !== 'get') return null;
-    const schema = stanza.getChild('schema', AGENT_API_NS);
-    if (schema) {
-      const agent = agents.find((candidate) => candidate.manifest.agent.jid === to);
-      const operation = agent?.operations.find((candidate) => candidate.name === schema.attrs.operation);
-      return agent && operation
-        ? buildSchemaResult(stanza, agent, operation, schema.attrs.direction === 'output' ? 'output' : 'input')
-        : null;
-    }
-    if (!query) return null;
-    if (query.attrs.xmlns === DISCO_INFO_NS && to === componentJid) return buildGatewayInfo(stanza, componentJid);
-    if (query.attrs.xmlns === DISCO_ITEMS_NS && query.attrs.node === AGENT_DIRECTORY_NS) {
-      return buildAgentDirectory(stanza, componentJid, agents);
-    }
-    const agent = agents.find((candidate) => candidate.manifest.agent.jid === to);
-    if (agent && query.attrs.xmlns === DISCO_INFO_NS && query.attrs.node === MCP_ENDPOINT_NS) {
-      return buildAgentInfo(stanza, agent);
-    }
-    if (agent && query.attrs.xmlns === DISCO_ITEMS_NS && query.attrs.node === AGENT_API_NS) {
-      return buildOperationItems(stanza, agent);
-    }
-    const operationName = operationFromNode(String(query.attrs.node ?? ''));
-    const operation = operationName ? agent?.operations.find((candidate) => candidate.name === operationName) : undefined;
-    if (agent && operation && query.attrs.xmlns === DISCO_INFO_NS) return buildOperationInfo(stanza, agent, operation);
-    return null;
-  };
+  const iqHandler = createXmppAgentIqHandler({
+    componentJid,
+    tenantForSender: () => 'integration-tenant',
+    store,
+  });
   const gateway = new EmbeddedXmppGateway({
     gatewayId: 'integration',
     componentJid,
     agentDomain: componentJid,
     componentService: `xmpp://127.0.0.1:${config.componentPort}`,
-    c2sService: config.xmppService,
     componentSecret: 'component-secret',
-    dataDir: config.gatewayDataDir,
     defaultAgentJid: agents[0].manifest.agent.jid,
   }, mailbox, iqHandler);
   const user = new XmppSession({ service: config.xmppService, domain: config.xmppDomain, username: 'john', password: 'secret' });
@@ -174,6 +166,24 @@ async function main(): Promise<void> {
     assert.equal(mailbox.inbound[2].platformId, agents[0].manifest.agent.jid);
     assert.equal(mailbox.inbound[2].message.content.text, 'alpha to beta');
 
+    await peer.send(buildTaskInvocation({
+      taskId: 'remote-task-1', rootTaskId: 'remote-task-1', callerJid: 'peer-agent@example.org',
+      targetJid: agents[1].manifest.agent.jid, tenantId: 'integration-tenant',
+      endpointId: `xmpp+mcp://${agents[1].manifest.agent.jid}`, operation: 'echo', apiVersion: '1.0.0',
+      inputSchemaDigest: agents[1].operations[0].inputSchemaDigest,
+      outputSchemaDigest: agents[1].operations[0].outputSchemaDigest,
+      arguments: { text: 'remote task' }, state: 'accepted', attempt: 1,
+      correlationId: 'remote-correlation-1', createdAt: new Date().toISOString(),
+    }));
+    assert.equal((await mailbox.waitForTaskInvocation()).toJid, agents[1].manifest.agent.jid);
+
+    const taskResult = peer.waitForStanza((stanza) => parseTaskEvent(stanza)?.taskId === 'remote-task-1');
+    await gateway.deliverTaskEvent({
+      taskId: 'remote-task-1', type: 'completed', from: agents[1].manifest.agent.jid,
+      to: 'peer-agent@example.org', payload: { result: { echo: 'remote task' } },
+    });
+    assert.deepEqual(parseTaskEvent(await taskResult)?.payload, { result: { echo: 'remote task' } });
+
     const reply = user.waitForBody('alpha reply');
     await gateway.deliver({
       from: agents[0].manifest.agent.jid,
@@ -201,7 +211,7 @@ async function main(): Promise<void> {
     const endpointQuery = child(await info, 'query', DISCO_INFO_NS);
     assert.equal(endpointQuery?.getChild('identity')?.attrs.type, 'mcp-endpoint');
     assert.ok(endpointQuery?.toString().includes('manifest_digest'));
-    assert.ok(endpointQuery?.toString().includes('digest-beta'));
+    assert.ok(endpointQuery?.toString().includes(agents[1].manifestDigest));
 
     const operationListId = `operations-${Date.now()}`;
     const operationList = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === operationListId);
@@ -214,7 +224,7 @@ async function main(): Promise<void> {
     await peer.send(xml('iq', { type: 'get', id: operationInfoId, to: agents[1].manifest.agent.jid }, xml('query', { xmlns: DISCO_INFO_NS, node: operationItem?.attrs.node })));
     const operationXml = (await operationInfo).toString();
     assert.ok(operationXml.includes(AGENT_OPERATION_NS));
-    assert.ok(operationXml.includes('input-beta'));
+    assert.ok(operationXml.includes(agents[1].operations[0].inputSchemaDigest));
     assert.ok(operationXml.includes('idempotent'));
 
     for (const direction of ['input', 'output'] as const) {
@@ -222,17 +232,20 @@ async function main(): Promise<void> {
       const schemaResult = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === schemaId);
       await peer.send(xml('iq', { type: 'get', id: schemaId, to: agents[1].manifest.agent.jid }, xml('schema', { xmlns: AGENT_API_NS, operation: 'echo', direction })));
       const schema = child(await schemaResult, 'schema', AGENT_API_NS);
-      assert.equal(schema?.attrs.digest, `${direction}-beta`);
+      assert.equal(schema?.attrs.digest, direction === 'input'
+        ? agents[1].operations[0].inputSchemaDigest
+        : agents[1].operations[0].outputSchemaDigest);
       assert.equal(JSON.parse(schema?.getText() ?? '{}').type, 'object');
     }
 
     assert.equal(mailbox.inbound.length, 3, 'IQ ping and discovery must not wake agents');
-    console.log('[e2e] embedded gateway: gateway/agent ping, human/agent, agent/human, agent/agent, and discovery passed');
+    console.log('[e2e] embedded gateway: ping, human/agent, agent/agent, discovery, and remote task lifecycle passed');
   } finally {
     await user.stop().catch(() => undefined);
     await peer?.stop().catch(() => undefined);
     await gateway.stop().catch(() => undefined);
     await stopOpenfireOnly();
+    closeDb();
   }
 }
 

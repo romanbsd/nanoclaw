@@ -9,7 +9,7 @@ import { StanzaRouter } from './stanza-router.js';
 import type { GatewayRuntimeMailbox } from './runtime-mailbox.js';
 import { applyStoreHints, buildOutboundStanza } from './xep-plugins/message.js';
 import { isMucJid } from './xep-plugins/muc.js';
-import { buildTaskInvocation } from './task-stanza-codec.js';
+import { buildTaskEvent, buildTaskInvocation, type TaskWireEvent } from './task-stanza-codec.js';
 import { createComponentSession, type IqGetHandler, type XmppComponentSession } from './xmpp-component.js';
 
 /** In-process XMPP channel runtime. All agent IO crosses GatewayRuntimeMailbox. */
@@ -54,6 +54,12 @@ export class EmbeddedXmppGateway {
 
   async deliverTask(task: AgentTaskRecord): Promise<string> {
     const stanza = buildTaskInvocation(task);
+    await this.requiredSession().send(stanza);
+    return String(stanza.attrs.id ?? '');
+  }
+
+  async deliverTaskEvent(event: TaskWireEvent): Promise<string> {
+    const stanza = buildTaskEvent(event);
     await this.requiredSession().send(stanza);
     return String(stanza.attrs.id ?? '');
   }

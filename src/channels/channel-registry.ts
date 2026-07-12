@@ -4,7 +4,6 @@
  * Channels self-register on import. The host calls initChannelAdapters() at startup
  * to instantiate and set up all registered adapters.
  */
-import { getAgentGroup } from '../db/agent-groups.js';
 import type { ChannelAdapter, ChannelDefaults, ChannelRegistration, ChannelSetup, OutboundFile } from './adapter.js';
 import type { ChannelDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
@@ -104,13 +103,23 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
       content: string,
       files?: OutboundFile[],
       instance?: string,
-      fromJid?: string,
+      senderIdentity?: string,
+      agentGroupId?: string,
     ): Promise<string | undefined> {
       const adapter = getChannelAdapterExact(instance ?? channelType);
       if (!adapter) {
         throw new MissingChannelAdapterError(channelType, instance);
       }
-      return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files }, { fromJid });
+      const resolvedIdentity =
+        senderIdentity ?? (agentGroupId ? adapter.resolveSenderIdentity?.(agentGroupId) : undefined);
+      return adapter.deliver(
+        platformId,
+        threadId,
+        { kind, content: JSON.parse(content), files },
+        {
+          senderIdentity: resolvedIdentity,
+        },
+      );
     },
     async setTyping(
       channelType: string,
@@ -120,9 +129,8 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
       agentGroupId?: string,
     ): Promise<void> {
       const adapter = getChannelAdapterExact(instance ?? channelType);
-      const fromJid =
-        channelType === 'xmpp' && agentGroupId ? (getAgentGroup(agentGroupId)?.xmpp_jid ?? undefined) : undefined;
-      await adapter?.setTyping?.(platformId, threadId, fromJid);
+      const senderIdentity = agentGroupId ? adapter?.resolveSenderIdentity?.(agentGroupId) : undefined;
+      await adapter?.setTyping?.(platformId, threadId, senderIdentity);
     },
     async clearTyping(
       channelType: string,
@@ -132,9 +140,8 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
       agentGroupId?: string,
     ): Promise<void> {
       const adapter = getChannelAdapterExact(instance ?? channelType);
-      const fromJid =
-        channelType === 'xmpp' && agentGroupId ? (getAgentGroup(agentGroupId)?.xmpp_jid ?? undefined) : undefined;
-      await adapter?.clearTyping?.(platformId, threadId, fromJid);
+      const senderIdentity = agentGroupId ? adapter?.resolveSenderIdentity?.(agentGroupId) : undefined;
+      await adapter?.clearTyping?.(platformId, threadId, senderIdentity);
     },
   };
 }

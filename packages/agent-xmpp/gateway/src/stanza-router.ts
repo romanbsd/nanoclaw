@@ -20,7 +20,7 @@ import {
 } from './xep-plugins/message.js';
 import { parseAskQuestionSubmit } from './xep-plugins/data-form.js';
 import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
-import { parseTaskInvocation } from './task-stanza-codec.js';
+import { parseTaskEvent, parseTaskInvocation } from './task-stanza-codec.js';
 
 export type SendStanzaFn = (stanza: Element) => Promise<void>;
 export type SendForAgentFn = (agentJid: string, stanza: Element) => Promise<void>;
@@ -48,7 +48,11 @@ export class StanzaRouter {
     const agentBare = bareJid(agentJid);
     // C2S inbox receives agent self-sent stanzas (outbound loopback) — drop them.
     if (fromBare && agentBare && fromBare === agentBare) return;
-    if (isAckOrReceiptStanza(stanza)) return;
+    const taskEvent = parseTaskEvent(stanza);
+    if (taskEvent) {
+      await this.mailbox.deliverTaskEvent(taskEvent);
+      return;
+    }
 
     const formSubmit = parseAskQuestionSubmit(stanza);
     if (formSubmit) {
@@ -64,16 +68,12 @@ export class StanzaRouter {
     }
 
     const task = parseTaskInvocation(stanza);
-    const agentMsg = task
-      ? {
-          id: task.taskId,
-          from: task.callerJid,
-          to: agentJid,
-          kind: 'task' as const,
-          contentType: 'application/json',
-          body: task,
-        }
-      : stanzaToAgentMessage(stanza, this.config.agentDomain);
+    if (task) {
+      await this.mailbox.deliverTaskInvocation(task);
+      return;
+    }
+    if (isAckOrReceiptStanza(stanza)) return;
+    const agentMsg = stanzaToAgentMessage(stanza, this.config.agentDomain);
     if (!agentMsg) return;
 
     const type = (stanza.attrs.type as string) || 'chat';

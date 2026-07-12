@@ -5,9 +5,9 @@ export function createOrchestratorAgent(row: OrchestratorAgent): void {
   getDb()
     .prepare(
       `INSERT INTO orchestrator_agents (
-         id, agent_group_id, xmpp_jid, tenant_id, mock_scenario, spawn_env, created_at
+         id, agent_group_id, tenant_id, mock_scenario, spawn_env, created_at
        ) VALUES (
-         @id, @agent_group_id, @xmpp_jid, @tenant_id, @mock_scenario, @spawn_env, @created_at
+         @id, @agent_group_id, @tenant_id, @mock_scenario, @spawn_env, @created_at
        )`,
     )
     .run(row);
@@ -24,9 +24,12 @@ export function getOrchestratorAgentByGroupId(agentGroupId: string): Orchestrato
 }
 
 export function getOrchestratorAgentByXmppJid(jid: string): OrchestratorAgent | undefined {
-  return getDb().prepare('SELECT * FROM orchestrator_agents WHERE xmpp_jid = ?').get(jid) as
-    | OrchestratorAgent
-    | undefined;
+  return getDb()
+    .prepare(
+      `SELECT oa.* FROM orchestrator_agents oa
+     JOIN agent_groups ag ON ag.id = oa.agent_group_id WHERE ag.xmpp_jid = ?`,
+    )
+    .get(jid) as OrchestratorAgent | undefined;
 }
 
 export function listOrchestratorAgents(): OrchestratorAgent[] {

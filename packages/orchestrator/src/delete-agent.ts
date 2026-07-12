@@ -39,7 +39,9 @@ export async function deleteNanoclawAgent(
   }
 
   const client = options.openfireClient ?? new OpenfireClient(loadOpenfireConfigFromEnv());
-  const username = usernameFromJid(record.xmpp_jid);
+  const jid = agentGroup.xmpp_jid;
+  if (!jid) throw new Error(`Agent group has no XMPP identity: ${agentGroup.id}`);
+  const username = usernameFromJid(jid);
   if (process.env.ORCHESTRATOR_SKIP_OPENFIRE !== '1') {
     await client.deleteUser(username).catch((err) => {
       console.warn(
@@ -77,7 +79,7 @@ export async function deleteNanoclawAgent(
   }
 
   if (hasTable(getDb(), 'xmpp_agent_apis')) {
-    getDb().prepare('DELETE FROM xmpp_agent_apis WHERE jid = ?').run(record.xmpp_jid);
+    getDb().prepare('DELETE FROM xmpp_agent_apis WHERE jid = ?').run(jid);
   }
 
   deleteContainerConfig(agentGroup.id);

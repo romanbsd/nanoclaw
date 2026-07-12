@@ -88,7 +88,8 @@ export function setTypingAdapter(a: TypingAdapter): void {
   adapter = a;
 }
 
-async function triggerTyping(
+async function setTypingState(
+  state: 'active' | 'cleared',
   channelType: string,
   platformId: string,
   threadId: string | null,
@@ -96,25 +97,11 @@ async function triggerTyping(
   agentGroupId?: string,
 ): Promise<void> {
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, instance, agentGroupId);
+    const method = state === 'active' ? adapter?.setTyping : adapter?.clearTyping;
+    await method?.(channelType, platformId, threadId, instance, agentGroupId);
     // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
   } catch (err) {
-    log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
-  }
-}
-
-async function clearTyping(
-  channelType: string,
-  platformId: string,
-  threadId: string | null,
-  instance?: string,
-  agentGroupId?: string,
-): Promise<void> {
-  try {
-    await adapter?.clearTyping?.(channelType, platformId, threadId, instance, agentGroupId);
-    // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
-  } catch (err) {
-    log.debug('Clear typing failed (best-effort)', { channelType, platformId, threadId, err });
+    log.debug('Typing state update failed (best-effort)', { state, channelType, platformId, threadId, err });
   }
 }
 
@@ -143,9 +130,7 @@ export function startTypingRefresh(
     // the container-wake latency budget. Also clear any lingering
     // post-delivery pause: a new inbound means the user expects
     // typing to show immediately.
-    triggerTyping(channelType, platformId, threadId, instance, agentGroupId).catch((err) => {
-      log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
-    });
+    void setTypingState('active', channelType, platformId, threadId, instance, agentGroupId);
     existing.startedAt = Date.now();
     existing.pausedUntil = 0;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
@@ -158,13 +143,12 @@ export function startTypingRefresh(
     existing.platformId = platformId;
     existing.threadId = threadId;
     existing.instance = instance;
+    existing.agentGroupId = agentGroupId;
     return;
   }
 
   // Immediate tick + periodic refresh.
-  triggerTyping(channelType, platformId, threadId, instance, agentGroupId).catch((err) => {
-    log.debug('Typing indicator failed (best-effort)', { channelType, platformId, threadId, err });
-  });
+  void setTypingState('active', channelType, platformId, threadId, instance, agentGroupId);
   const startedAt = Date.now();
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
@@ -177,15 +161,13 @@ export function startTypingRefresh(
 
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.agentGroupId).catch(
-        (err) => {
-          log.debug('Typing indicator failed (best-effort)', {
-            channelType: entry.channelType,
-            platformId: entry.platformId,
-            threadId: entry.threadId,
-            err,
-          });
-        },
+      void setTypingState(
+        'active',
+        entry.channelType,
+        entry.platformId,
+        entry.threadId,
+        entry.instance,
+        entry.agentGroupId,
       );
       return;
     }
@@ -218,27 +200,27 @@ export function pauseTypingRefreshAfterDelivery(sessionId: string): void {
   const entry = typingRefreshers.get(sessionId);
   if (!entry) return;
   entry.pausedUntil = Date.now() + POST_DELIVERY_PAUSE_MS;
-  clearTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.agentGroupId).catch((err) => {
-    log.debug('Clear typing failed (best-effort)', {
-      channelType: entry.channelType,
-      platformId: entry.platformId,
-      threadId: entry.threadId,
-      err,
-    });
-  });
+  void setTypingState(
+    'cleared',
+    entry.channelType,
+    entry.platformId,
+    entry.threadId,
+    entry.instance,
+    entry.agentGroupId,
+  );
 }
 
 export function stopTypingRefresh(sessionId: string): void {
   const entry = typingRefreshers.get(sessionId);
   if (!entry) return;
-  clearTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance, entry.agentGroupId).catch((err) => {
-    log.debug('Clear typing failed (best-effort)', {
-      channelType: entry.channelType,
-      platformId: entry.platformId,
-      threadId: entry.threadId,
-      err,
-    });
-  });
+  void setTypingState(
+    'cleared',
+    entry.channelType,
+    entry.platformId,
+    entry.threadId,
+    entry.instance,
+    entry.agentGroupId,
+  );
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
 }

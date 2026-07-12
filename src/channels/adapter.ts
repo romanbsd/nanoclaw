@@ -200,12 +200,14 @@ export interface ChannelAdapter {
     platformId: string,
     threadId: string | null,
     message: OutboundMessage,
-    options?: { fromJid?: string },
+    options?: { senderIdentity?: string },
   ): Promise<string | undefined>;
 
   // Optional
-  setTyping?(platformId: string, threadId: string | null, fromJid?: string): Promise<void>;
-  clearTyping?(platformId: string, threadId: string | null, fromJid?: string): Promise<void>;
+  setTyping?(platformId: string, threadId: string | null, senderIdentity?: string): Promise<void>;
+  clearTyping?(platformId: string, threadId: string | null, senderIdentity?: string): Promise<void>;
+  /** Resolve a channel-native sending identity for an agent group. */
+  resolveSenderIdentity?(agentGroupId: string): string | undefined;
   syncConversations?(): Promise<ConversationInfo[]>;
   resolveChannelName?(platformId: string): Promise<string | null>;
 

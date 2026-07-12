@@ -175,7 +175,7 @@ async function routeXmppInbound(event: InboundEvent): Promise<boolean> {
       log.debug('XMPP inbound for unknown agent JID from human sender', {
         recipientJid,
         from: event.platformId,
-        hint: 'Expected for human peers on the agent domain; gateway should not agent-loopback without a C2S session',
+        hint: 'Expected for human peers; only registered logical agent JIDs route to session mailboxes',
       });
     }
     return true;

@@ -72,6 +72,10 @@ describe('XMPP agent gateway store', () => {
     };
     expect(store.createTask({ ...base, taskId: 'task-1' }).taskId).toBe('task-1');
     expect(store.createTask({ ...base, taskId: 'task-2', rootTaskId: 'task-2' }).taskId).toBe('task-1');
+    store.addTaskWaiter('task-1', 'request-1', 'ag-1', 'session-1');
+    store.addTaskWaiter('task-1', 'request-2', 'ag-1', 'session-1');
+    expect(store.takeTaskWaiters('task-1').map((waiter) => waiter.requestId)).toEqual(['request-1', 'request-2']);
+    expect(store.takeTaskWaiters('task-1')).toEqual([]);
     expect(store.transition('task-1', 'completed', { result: { summary: 'ok' } }).state).toBe('completed');
     expect(() => store.transition('task-1', 'failed')).toThrow(/terminal/);
   });

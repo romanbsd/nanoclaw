@@ -209,7 +209,6 @@ export async function provisionNanoclawAgent(
     const orchRow: OrchestratorAgent = {
       id: orchestratorId,
       agent_group_id: agentGroupId,
-      xmpp_jid: identity.jid,
       tenant_id: request.tenantId,
       mock_scenario: request.mockScenario ?? null,
       spawn_env: JSON.stringify(spawnEnv),

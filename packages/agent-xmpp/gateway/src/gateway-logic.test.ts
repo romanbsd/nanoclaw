@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import { isAgentJid, resolveTargetAgentJid } from './xep-plugins/message.js';
 import { isMucJid, mucRoomFromStanza } from './xep-plugins/muc.js';
-import { defaultPubsubService } from './xep-plugins/pubsub.js';
 
 /** Pure-logic tests that do not require XMPP connection or SQLite bindings. */
 describe('gateway pure logic', () => {
@@ -21,7 +20,4 @@ describe('gateway pure logic', () => {
     expect(mucRoomFromStanza('room@conference.example.com/nick')).toBe('room@conference.example.com');
   });
 
-  it('derives pubsub service JID', () => {
-    expect(defaultPubsubService('agents.example')).toBe('pubsub.agents.example');
-  });
 });

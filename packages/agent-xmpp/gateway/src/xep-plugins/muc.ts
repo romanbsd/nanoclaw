@@ -2,14 +2,21 @@
 
 import { xml, type Element } from '@xmpp/xml';
 
-import type { XmppJoinRoomInput, XmppLeaveRoomInput, XmppSendRoomMessageInput } from '@agent-xmpp/protocol';
-
 import { isMucJid } from './jid.js';
 import { buildOutboundStanza } from './message.js';
 
 export { isMucJid };
 
 const MUC_NS = 'http://jabber.org/protocol/muc';
+
+export interface XmppJoinRoomInput { roomJid: string; nickname?: string; password?: string }
+export interface XmppLeaveRoomInput { roomJid: string; nickname?: string }
+export interface XmppSendRoomMessageInput {
+  roomJid: string;
+  body: string;
+  threadId?: string;
+  mentions?: string[];
+}
 
 export function buildJoinPresence(input: XmppJoinRoomInput, agentJid: string): Element {
   const nick = input.nickname || agentJid.split('@')[0];

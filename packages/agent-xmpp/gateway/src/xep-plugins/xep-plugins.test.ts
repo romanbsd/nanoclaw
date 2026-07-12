@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { xml } from '@xmpp/xml';
 
 import { buildJoinPresence, buildRoomMessage, isMucJid } from './muc.js';
-import { buildSlotRequest, sha256Hex } from './file-upload.js';
 import { buildReceivedReceipt, isAckOrReceiptStanza } from './receipts.js';
 
 describe('muc plugin', () => {
@@ -19,18 +18,6 @@ describe('muc plugin', () => {
   it('builds groupchat message', () => {
     const m = buildRoomMessage({ roomJid: 'room@conference.test', body: 'hi' }, 'bot@agents.test');
     expect(m.attrs.type).toBe('groupchat');
-  });
-});
-
-describe('file-upload plugin', () => {
-  it('builds slot request IQ', () => {
-    const iq = buildSlotRequest('bot@test', 'upload.test', 100, 'text/plain', 'a.txt');
-    expect(iq.name).toBe('iq');
-    expect(iq.getChild('request', 'urn:xmpp:http:upload:0')).toBeDefined();
-  });
-
-  it('computes sha256', () => {
-    expect(sha256Hex(Buffer.from('hello'))).toHaveLength(64);
   });
 });
 

@@ -9,10 +9,46 @@ export interface ParsedTaskInvocation {
   inputSchemaDigest: string;
   outputSchemaDigest?: string;
   callerJid: string;
+  toJid: string;
   tenantId: string;
   workspaceId?: string;
   arguments: unknown;
   deadline?: string;
+}
+
+export interface TaskWireEvent {
+  taskId: string;
+  type: 'progress' | 'input_required' | 'input' | 'cancel_requested' | 'completed' | 'failed' | 'cancelled';
+  from: string;
+  to: string;
+  payload: Record<string, unknown>;
+}
+
+export function parseTaskEvent(stanza: Element): TaskWireEvent | null {
+  if (stanza.name !== 'message') return null;
+  const event = stanza.getChild('event', AGENT_TASK_NS);
+  if (!event?.attrs['task-id'] || !event.attrs.type) return null;
+  const type = String(event.attrs.type) as TaskWireEvent['type'];
+  if (!['progress', 'input_required', 'input', 'cancel_requested', 'completed', 'failed', 'cancelled'].includes(type)) return null;
+  try {
+    return {
+      taskId: String(event.attrs['task-id']),
+      type,
+      from: String(stanza.attrs.from ?? ''),
+      to: String(stanza.attrs.to ?? ''),
+      payload: JSON.parse(event.getText() || '{}') as Record<string, unknown>,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function buildTaskEvent(event: TaskWireEvent): Element {
+  return xml(
+    'message',
+    { from: event.from, to: event.to, type: 'normal', id: `${event.type}-${event.taskId}` },
+    xml('event', { xmlns: AGENT_TASK_NS, 'task-id': event.taskId, type: event.type }, JSON.stringify(event.payload)),
+  );
 }
 
 export function parseTaskInvocation(stanza: Element): ParsedTaskInvocation | null {
@@ -37,6 +73,7 @@ export function parseTaskInvocation(stanza: Element): ParsedTaskInvocation | nul
     inputSchemaDigest: String(invoke.attrs['input-schema-digest'] ?? ''),
     outputSchemaDigest: invoke.attrs['output-schema-digest'] ? String(invoke.attrs['output-schema-digest']) : undefined,
     callerJid: String(caller?.attrs.jid ?? stanza.attrs.from ?? ''),
+    toJid: String(stanza.attrs.to ?? '').split('/')[0],
     tenantId: String(context?.attrs['tenant-id'] ?? 'default'),
     workspaceId: context?.attrs['workspace-id'] ? String(context.attrs['workspace-id']) : undefined,
     arguments: args,

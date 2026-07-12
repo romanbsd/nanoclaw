@@ -1,14 +1,18 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   closeDb,
   createAgentGroup,
   createOrchestratorAgent,
   getDb,
+  getMessagingGroupByPlatform,
+  getOrchestratorAgent,
   initTestDb,
   runMigrations,
 } from '../../../src/db/index.js';
 import { createOrchestratorServer, startOrchestratorServer } from './http-server.js';
+import type { OpenfireClient } from './openfire-client.js';
+import { removeAgentGroupFolder } from './provision-nanoclaw-agent.js';
 
 describe('orchestrator http server', () => {
   beforeEach(() => {
@@ -32,7 +36,6 @@ describe('orchestrator http server', () => {
     createOrchestratorAgent({
       id: 'orch-1',
       agent_group_id: 'ag-1',
-      xmpp_jid: 'a@example.org',
       tenant_id: 'example.org',
       mock_scenario: null,
       spawn_env: 'not-json',
@@ -43,6 +46,49 @@ describe('orchestrator http server', () => {
     const reply = await app.inject({ method: 'GET', url: '/v1/agents/orch-1' });
     expect(reply.statusCode).toBe(200);
     expect(reply.json().spawnEnv).toEqual({});
+    await app.close();
+  });
+
+  it('provisions a mailbox-wired multi-agent identity through the API', async () => {
+    const openfireClient = {
+      getUser: vi.fn().mockResolvedValue(false),
+      createUser: vi.fn().mockResolvedValue(undefined),
+      setVcard: vi.fn().mockResolvedValue(undefined),
+      ensureSharedGroup: vi.fn().mockResolvedValue(undefined),
+      addUserToGroup: vi.fn().mockResolvedValue(undefined),
+      deleteUser: vi.fn().mockResolvedValue(undefined),
+    } as unknown as OpenfireClient;
+    const app = await createOrchestratorServer({ openfireClient, apiSecret: 'test-secret' });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/agents',
+      headers: { authorization: 'Bearer test-secret' },
+      payload: {
+        name: 'Research Agent',
+        agentId: 'research',
+        tenantId: 'agents.example.org',
+        displayName: 'Research',
+        provider: 'mock',
+        agentApiManifest: {
+          specVersion: 'urn:businessos:agent-api:1',
+          capabilities: { structuredOutput: true },
+          operations: [{
+            name: 'research.lookup',
+            description: 'Look up a topic.',
+            inputSchema: { type: 'object', required: ['topic'], properties: { topic: { type: 'string' } } },
+            outputSchema: { type: 'object', required: ['answer'], properties: { answer: { type: 'string' } } },
+          }],
+        },
+      },
+    });
+    expect(response.statusCode).toBe(201);
+    const created = response.json() as { id: string; folder: string; jid: string; messagingGroupId: string };
+    expect(created.jid).toBe('research@agents.example.org');
+    expect(getMessagingGroupByPlatform('xmpp', created.jid, 'xmpp')?.id).toBe(created.messagingGroupId);
+    const record = getOrchestratorAgent(created.id);
+    expect(record?.spawn_env).not.toContain('XMPP_GATEWAY_URL');
+    expect(openfireClient.createUser).toHaveBeenCalledOnce();
+    removeAgentGroupFolder(created.folder);
     await app.close();
   });
 

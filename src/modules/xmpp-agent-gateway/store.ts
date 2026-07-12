@@ -172,6 +172,31 @@ export class XmppAgentGatewayStore {
     return row ? fromTaskRow(row) : null;
   }
 
+  addTaskWaiter(taskId: string, requestId: string, agentGroupId: string, sessionId: string): void {
+    getDb()
+      .prepare(
+        `INSERT OR IGNORE INTO xmpp_agent_task_waiters
+         (task_id, request_id, agent_group_id, session_id, created_at) VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(taskId, requestId, agentGroupId, sessionId, new Date().toISOString());
+  }
+
+  takeTaskWaiters(taskId: string): Array<{ requestId: string; agentGroupId: string; sessionId: string }> {
+    const db = getDb();
+    const rows = db
+      .prepare(
+        `SELECT request_id, agent_group_id, session_id FROM xmpp_agent_task_waiters
+         WHERE task_id = ? ORDER BY created_at`,
+      )
+      .all(taskId) as Array<{ request_id: string; agent_group_id: string; session_id: string }>;
+    db.prepare('DELETE FROM xmpp_agent_task_waiters WHERE task_id = ?').run(taskId);
+    return rows.map((row) => ({
+      requestId: row.request_id,
+      agentGroupId: row.agent_group_id,
+      sessionId: row.session_id,
+    }));
+  }
+
   transition(taskId: string, state: AgentTaskState, patch: Partial<AgentTaskRecord> = {}): AgentTaskRecord {
     const current = this.getTask(taskId);
     if (!current) throw new Error(`unknown task: ${taskId}`);

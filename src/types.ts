@@ -14,7 +14,6 @@ export interface AgentGroup {
 export interface OrchestratorAgent {
   id: string;
   agent_group_id: string;
-  xmpp_jid: string;
   tenant_id: string | null;
   mock_scenario: string | null;
   /** JSON object of extra container spawn env vars. */

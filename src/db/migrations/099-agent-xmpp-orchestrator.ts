@@ -17,13 +17,11 @@ export const migration099: Migration = {
       CREATE TABLE IF NOT EXISTS orchestrator_agents (
         id                  TEXT PRIMARY KEY,
         agent_group_id      TEXT NOT NULL REFERENCES agent_groups(id) ON DELETE CASCADE,
-        xmpp_jid            TEXT NOT NULL,
         tenant_id           TEXT,
         mock_scenario       TEXT,
         spawn_env           TEXT NOT NULL DEFAULT '{}',
         created_at          TEXT NOT NULL
       );
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestrator_agents_xmpp_jid ON orchestrator_agents(xmpp_jid);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_orchestrator_agents_agent_group ON orchestrator_agents(agent_group_id);
     `);
   },

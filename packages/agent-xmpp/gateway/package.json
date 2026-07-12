@@ -18,15 +18,11 @@
   },
   "dependencies": {
     "@agent-xmpp/protocol": "workspace:*",
-    "@xmpp/client": "0.14.0",
     "@xmpp/component": "0.14.0",
-    "@xmpp/reconnect": "0.14.0",
     "@xmpp/xml": "0.14.0",
-    "better-sqlite3": "12.11.1",
     "ulid": "3.0.2"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "tsx": "^4.23.0",
     "typescript": "^5.7.0",

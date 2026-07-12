@@ -2,7 +2,6 @@ import { component } from '@xmpp/component';
 import { xml, type Element } from '@xmpp/xml';
 
 import type { GatewayConfig } from './config.js';
-import { buildGatewayDiscoResponse } from './xep-plugins/discovery.js';
 
 export interface XmppComponentSession {
   send: (stanza: Element) => Promise<void>;

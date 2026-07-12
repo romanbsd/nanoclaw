@@ -1,5 +1,3 @@
-import path from 'path';
-
 export interface GatewayConfig {
   gatewayId: string;
   /** Component JID, e.g. gateway.agents.example */
@@ -8,10 +6,7 @@ export interface GatewayConfig {
   agentDomain: string;
   /** xmpp://host:5275 or xmpps://host:5347 */
   componentService: string;
-  /** Client (c2s) service for agent inbox sessions, e.g. xmpp://host:5222 */
-  c2sService: string;
   componentSecret: string;
-  dataDir: string;
   defaultAgentJid: string;
 }
 
@@ -31,9 +26,7 @@ export function loadConfig(): GatewayConfig {
     componentJid,
     agentDomain,
     componentService: env('XMPP_COMPONENT_SERVICE', 'xmpp://127.0.0.1:5275'),
-    c2sService: env('XMPP_C2S_SERVICE', process.env.XMPP_SERVICE || 'xmpp://127.0.0.1:5222'),
     componentSecret: env('XMPP_COMPONENT_SECRET'),
-    dataDir: process.env.XMPP_GATEWAY_DATA_DIR || path.join(process.cwd(), 'data', 'xmpp-gateway'),
     defaultAgentJid: process.env.XMPP_DEFAULT_AGENT_JID || `assistant@${agentDomain}`,
   };
 }

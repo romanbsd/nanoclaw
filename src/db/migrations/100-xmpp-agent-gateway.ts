@@ -52,6 +52,15 @@ export const migration100: Migration = {
         WHERE idempotency_key IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_xmpp_agent_tasks_target ON xmpp_agent_tasks(target_jid, state, created_at);
 
+      CREATE TABLE IF NOT EXISTS xmpp_agent_task_waiters (
+        task_id TEXT NOT NULL REFERENCES xmpp_agent_tasks(task_id) ON DELETE CASCADE,
+        request_id TEXT NOT NULL,
+        agent_group_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (task_id, request_id)
+      );
+
       CREATE TABLE IF NOT EXISTS xmpp_agent_task_events (
         event_id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL REFERENCES xmpp_agent_tasks(task_id) ON DELETE CASCADE,

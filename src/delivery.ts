@@ -69,8 +69,9 @@ export interface ChannelDeliveryAdapter {
     /** Delivering adapter instance (defaults to channelType downstream).
      *  Host-internal only — containers never see instance. */
     instance?: string,
-    /** XMPP outbound from JID (per-agent). */
-    fromJid?: string,
+    /** Optional channel-native identity for the sending agent. */
+    senderIdentity?: string,
+    agentGroupId?: string,
   ): Promise<string | undefined>;
   setTyping?(
     channelType: string,
@@ -417,7 +418,8 @@ async function deliverMessage(
     msg.content,
     files,
     deliverInstance,
-    msg.channel_type === 'xmpp' ? (getAgentGroup(session.agent_group_id)?.xmpp_jid ?? undefined) : undefined,
+    undefined,
+    session.agent_group_id,
   );
   log.info('Message delivered', {
     id: msg.id,

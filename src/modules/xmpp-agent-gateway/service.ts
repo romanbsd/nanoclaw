@@ -8,7 +8,9 @@ import {
   type GatewayMailboxRequest,
   type GatewayMailboxResponse,
   type StartAgentToolInput,
+  terminalTaskStates,
 } from '@agent-xmpp/protocol';
+import type { ParsedTaskInvocation, TaskWireEvent } from '@agent-xmpp/gateway';
 
 import { getAgentInboundTransport } from '../../agent-inbound/index.js';
 import { getDeliveryAdapter } from '../../delivery.js';
@@ -39,6 +41,108 @@ export class XmppAgentGatewayService {
       });
     }
     void inDb;
+  }
+
+  async acceptRemoteInvocation(input: ParsedTaskInvocation): Promise<void> {
+    const target = getAgentGroupByXmppJid(input.toJid);
+    if (!target) throw new Error('target agent is not provisioned');
+    const tenantId = getOrchestratorAgentByGroupId(target.id)?.tenant_id ?? 'default';
+    if (input.tenantId !== tenantId) throw new Error('cross-tenant task invocation rejected');
+    const agent = this.store.getAgent(input.toJid, input.apiVersion);
+    const operation = agent?.operations.find((item) => item.name === input.operation);
+    if (!agent || !operation) throw new Error('operation not found');
+    if (operation.inputSchemaDigest !== input.inputSchemaDigest) throw new Error('input schema digest mismatch');
+    const errors = validateJson(operation.inputSchema, input.arguments);
+    if (errors.length) throw new Error(`argument schema validation failed: ${errors.join('; ')}`);
+    const now = new Date().toISOString();
+    const task = this.store.createTask({
+      taskId: input.taskId,
+      rootTaskId: input.taskId,
+      callerJid: input.callerJid,
+      targetJid: input.toJid,
+      tenantId,
+      workspaceId: input.workspaceId,
+      endpointId: `xmpp+mcp://${input.toJid}`,
+      operation: input.operation,
+      apiVersion: input.apiVersion,
+      inputSchemaDigest: input.inputSchemaDigest,
+      outputSchemaDigest: input.outputSchemaDigest,
+      arguments: input.arguments,
+      state: 'accepted',
+      attempt: 1,
+      correlationId: input.correlationId,
+      createdAt: now,
+      acceptedAt: now,
+      deadline: input.deadline,
+    });
+    await this.deliverTaskMessage(task, 'task_invoke', { arguments: task.arguments });
+    this.store.transition(task.taskId, 'running', { startedAt: new Date().toISOString() });
+  }
+
+  async acceptRemoteEvent(event: TaskWireEvent): Promise<void> {
+    const task = this.store.getTask(event.taskId);
+    if (!task) throw new Error('task not found');
+    const sender = event.from.split('/')[0];
+    if (event.type === 'cancel_requested' || event.type === 'input') {
+      if (task.callerJid !== sender) throw new Error('task event sender mismatch');
+      await this.deliverTaskMessage(task, event.type === 'input' ? 'task_input' : 'task_cancel', event.payload);
+      if (event.type === 'input') this.store.transition(task.taskId, 'running');
+      else this.store.transition(task.taskId, 'cancelling');
+      return;
+    }
+    if (task.targetJid !== sender) throw new Error('task event sender mismatch');
+    if (event.type === 'progress') {
+      this.store.appendEvent({ type: 'progress', taskId: task.taskId, ...event.payload });
+      return;
+    }
+    if (event.type === 'input_required') {
+      const requestId = String(event.payload.requestId ?? `input-${randomUUID()}`);
+      const inputSchema = (event.payload.inputSchema ?? {}) as Record<string, unknown>;
+      this.store.appendEvent({
+        type: 'input_required',
+        taskId: task.taskId,
+        requestId,
+        question: String(event.payload.question ?? ''),
+        inputSchema,
+      });
+      this.store.transition(task.taskId, 'input_required');
+      this.respondToWaiters(task, {
+        requestId: task.correlationId,
+        ok: true,
+        result: {
+          taskId: task.taskId,
+          status: 'input_required',
+          requestId,
+          question: event.payload.question,
+          inputSchema,
+        },
+      });
+      return;
+    }
+    if (event.type === 'completed') {
+      const completed = this.store.transition(task.taskId, 'completed', {
+        result: event.payload.result,
+        summary: optionalString(event.payload.summary),
+      });
+      this.respondToWaiters(completed, { requestId: completed.correlationId, ok: true, result: taskResult(completed) });
+      return;
+    }
+    if (event.type === 'failed') {
+      const error = (event.payload.error ?? event.payload) as AgentTaskError;
+      const failed = this.store.transition(task.taskId, 'failed', { error });
+      this.respondToWaiters(failed, {
+        requestId: failed.correlationId,
+        ok: false,
+        error: { code: error.code ?? 'execution-failed', message: error.message ?? 'Task failed' },
+      });
+      return;
+    }
+    const cancelled = this.store.transition(task.taskId, 'cancelled');
+    this.respondToWaiters(cancelled, {
+      requestId: cancelled.correlationId,
+      ok: true,
+      result: { taskId: cancelled.taskId, status: cancelled.state },
+    });
   }
 
   private async execute(request: GatewayMailboxRequest, session: Session): Promise<unknown | typeof DEFERRED> {
@@ -72,8 +176,7 @@ export class XmppAgentGatewayService {
       case 'agents.start_tool':
         return this.startTask(request.payload as unknown as StartAgentToolInput, request.requestId, session, false);
       case 'agents.call_tool':
-        await this.startTask(request.payload as unknown as StartAgentToolInput, request.requestId, session, true);
-        return DEFERRED;
+        return this.startTask(request.payload as unknown as StartAgentToolInput, request.requestId, session, true);
       case 'agents.get_task':
       case 'agents.get_result': {
         const task = this.authorizedTask(String(request.payload.taskId ?? ''), principal.tenantId);
@@ -114,6 +217,11 @@ export class XmppAgentGatewayService {
           stage: optionalString(request.payload.stage),
           message: optionalString(request.payload.message),
         });
+        await this.emitRemoteEvent(task, 'progress', {
+          percent: request.payload.percent,
+          stage: request.payload.stage,
+          message: request.payload.message,
+        });
         return { taskId: task.taskId, status: task.state };
       }
       case 'task.request_input': {
@@ -128,7 +236,7 @@ export class XmppAgentGatewayService {
           inputSchema,
         });
         this.store.transition(task.taskId, 'input_required');
-        this.respondToCaller(task, {
+        const notified = this.respondToWaiters(task, {
           requestId: task.correlationId,
           ok: true,
           result: {
@@ -139,6 +247,12 @@ export class XmppAgentGatewayService {
             inputSchema,
           },
         });
+        if (!notified)
+          await this.emitRemoteEvent(task, 'input_required', {
+            requestId: inputRequestId,
+            question: request.payload.question,
+            inputSchema,
+          });
         return { taskId: task.taskId, requestId: inputRequestId };
       }
       case 'task.complete': {
@@ -159,7 +273,7 @@ export class XmppAgentGatewayService {
           result: request.payload.result,
           summary: optionalString(request.payload.summary),
         });
-        this.respondToCaller(completed, {
+        const notified = this.respondToWaiters(completed, {
           requestId: completed.correlationId,
           ok: true,
           result: {
@@ -169,6 +283,11 @@ export class XmppAgentGatewayService {
             summary: completed.summary,
           },
         });
+        if (!notified)
+          await this.emitRemoteEvent(completed, 'completed', {
+            result: completed.result,
+            summary: completed.summary,
+          });
         return { taskId: completed.taskId, status: completed.state };
       }
       case 'task.fail': {
@@ -181,22 +300,24 @@ export class XmppAgentGatewayService {
         };
         this.store.appendEvent({ type: 'failed', taskId: task.taskId, error });
         const failed = this.store.transition(task.taskId, 'failed', { error });
-        this.respondToCaller(failed, {
+        const notified = this.respondToWaiters(failed, {
           requestId: failed.correlationId,
           ok: false,
           error: { code: error.code, message: error.message },
         });
+        if (!notified) await this.emitRemoteEvent(failed, 'failed', { error });
         return { taskId: failed.taskId, status: failed.state };
       }
       case 'task.cancelled': {
         const task = this.targetTask(request.payload, principal.jid);
         this.store.appendEvent({ type: 'cancelled', taskId: task.taskId });
         const cancelled = this.store.transition(task.taskId, 'cancelled');
-        this.respondToCaller(cancelled, {
+        const notified = this.respondToWaiters(cancelled, {
           requestId: cancelled.correlationId,
           ok: true,
           result: { taskId: cancelled.taskId, status: cancelled.state },
         });
+        if (!notified) await this.emitRemoteEvent(cancelled, 'cancelled', {});
         return { taskId: cancelled.taskId, status: cancelled.state };
       }
     }
@@ -241,7 +362,14 @@ export class XmppAgentGatewayService {
       acceptedAt: now,
       deadline: input.timeoutSeconds ? new Date(Date.now() + input.timeoutSeconds * 1000).toISOString() : undefined,
     });
-    if (task.taskId !== taskId) return task;
+    if (task.taskId !== taskId) {
+      if (!wait) return task;
+      if (task.state === 'completed') return taskResult(task);
+      if (terminalTaskStates.has(task.state)) throw new Error(task.error?.message ?? `task ${task.state}`);
+      this.store.addTaskWaiter(task.taskId, correlationId, session.agent_group_id, session.id);
+      return DEFERRED;
+    }
+    if (wait) this.store.addTaskWaiter(task.taskId, correlationId, session.agent_group_id, session.id);
     await this.deliverTaskMessage(task, 'task_invoke', {
       operation: {
         name: operation.name,
@@ -254,7 +382,9 @@ export class XmppAgentGatewayService {
       caller: { jid: task.callerJid, kind: 'agent' },
     });
     this.store.transition(task.taskId, 'running', { startedAt: new Date().toISOString() });
-    return wait ? task : { taskId: task.taskId, status: 'accepted', endpointId: task.endpointId, tool: task.operation };
+    return wait
+      ? DEFERRED
+      : { taskId: task.taskId, status: 'accepted', endpointId: task.endpointId, tool: task.operation };
   }
 
   private async deliverTaskMessage(
@@ -266,12 +396,25 @@ export class XmppAgentGatewayService {
     if (!target) {
       const adapter = getDeliveryAdapter();
       if (!adapter) throw new Error('XMPP delivery adapter is unavailable');
+      const wireType = event === 'task_cancel' ? 'cancel_requested' : event === 'task_input' ? 'input' : null;
       await adapter.deliver(
         'xmpp',
         task.targetJid,
         task.taskId,
-        'agent-task',
-        JSON.stringify({ agentTask: task }),
+        wireType ? 'agent-task-event' : 'agent-task',
+        JSON.stringify(
+          wireType
+            ? {
+                agentTaskEvent: {
+                  taskId: task.taskId,
+                  type: wireType,
+                  from: task.callerJid,
+                  to: task.targetJid,
+                  payload,
+                },
+              }
+            : { agentTask: task },
+        ),
         undefined,
         'xmpp',
         task.callerJid,
@@ -363,12 +506,37 @@ export class XmppAgentGatewayService {
     });
   }
 
-  private respondToCaller(task: AgentTaskRecord, response: GatewayMailboxResponse): void {
-    if (!task.callerSessionId) return;
-    const group = getAgentGroupByXmppJid(task.callerJid);
-    if (!group) return;
-    const session = { id: task.callerSessionId, agent_group_id: group.id } as Session;
-    this.respond(session, response.requestId, response);
+  private respondToWaiters(task: AgentTaskRecord, response: GatewayMailboxResponse): boolean {
+    const waiters = this.store.takeTaskWaiters(task.taskId);
+    for (const waiter of waiters) {
+      this.respond({ id: waiter.sessionId, agent_group_id: waiter.agentGroupId } as Session, waiter.requestId, {
+        ...response,
+        requestId: waiter.requestId,
+      });
+    }
+    return waiters.length > 0;
+  }
+
+  private async emitRemoteEvent(
+    task: AgentTaskRecord,
+    type: TaskWireEvent['type'],
+    payload: Record<string, unknown>,
+  ): Promise<void> {
+    if (getAgentGroupByXmppJid(task.callerJid)) return;
+    const adapter = getDeliveryAdapter();
+    if (!adapter) throw new Error('XMPP delivery adapter is unavailable');
+    await adapter.deliver(
+      'xmpp',
+      task.callerJid,
+      task.taskId,
+      'agent-task-event',
+      JSON.stringify({
+        agentTaskEvent: { taskId: task.taskId, type, from: task.targetJid, to: task.callerJid, payload },
+      }),
+      undefined,
+      'xmpp',
+      task.targetJid,
+    );
   }
 }
 
@@ -395,4 +563,13 @@ function classifyError(message: string): string {
   if (message.includes('not found')) return 'not-found';
   if (message.includes('maximum delegation')) return 'delegation-limit';
   return 'gateway-error';
+}
+
+function taskResult(task: AgentTaskRecord): Record<string, unknown> {
+  return {
+    taskId: task.taskId,
+    status: task.state,
+    structuredContent: task.result,
+    summary: task.summary,
+  };
 }
