@@ -44,6 +44,29 @@ export class XmppSession {
     );
   }
 
+  async send(stanza: Element): Promise<void> {
+    await this.xmpp.send(stanza);
+  }
+
+  waitForStanza(predicate: (stanza: Element) => boolean, timeoutMs = 30_000): Promise<Element> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('timeout waiting for XMPP stanza'));
+      }, timeoutMs);
+      const handler = (stanza: Element) => {
+        if (!predicate(stanza)) return;
+        cleanup();
+        resolve(stanza);
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.handlers = this.handlers.filter((h) => h !== handler);
+      };
+      this.handlers.push(handler);
+    });
+  }
+
   waitForBody(text: string, timeoutMs = 30_000): Promise<Element> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {

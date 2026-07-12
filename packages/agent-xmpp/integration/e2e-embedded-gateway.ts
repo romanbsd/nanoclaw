@@ -1,0 +1,242 @@
+#!/usr/bin/env tsx
+import assert from 'node:assert/strict';
+
+import type { AgentApiManifest, BridgeFormResponsePayload, BridgeInboundPayload, RegisteredAgent } from '@agent-xmpp/protocol';
+import {
+  AGENT_API_NS,
+  AGENT_DIRECTORY_NS,
+  AGENT_OPERATION_NS,
+  DISCO_INFO_NS,
+  DISCO_ITEMS_NS,
+  MCP_ENDPOINT_NS,
+  EmbeddedXmppGateway,
+  PING_NS,
+  buildAgentDirectory,
+  buildAgentInfo,
+  buildGatewayInfo,
+  buildOperationInfo,
+  buildOperationItems,
+  buildPingResponse,
+  buildSchemaResult,
+  isPingRequest,
+  operationFromNode,
+  type GatewayRuntimeMailbox,
+} from '@agent-xmpp/gateway';
+import { xml, type Element } from '@xmpp/xml';
+
+import { runOpenfireBootstrap, startOpenfireOnly, stopOpenfireOnly } from './e2e-stack.js';
+import { XmppSession } from './xmpp-session.js';
+
+class MailboxSpy implements GatewayRuntimeMailbox {
+  readonly inbound: BridgeInboundPayload[] = [];
+  readonly forms: BridgeFormResponsePayload[] = [];
+  private waiters: Array<() => void> = [];
+
+  async deliverInbound(payload: BridgeInboundPayload): Promise<void> {
+    this.inbound.push(payload);
+    this.waiters.splice(0).forEach((resolve) => resolve());
+  }
+
+  async deliverFormResponse(payload: BridgeFormResponsePayload): Promise<void> {
+    this.forms.push(payload);
+  }
+
+  async waitForInbound(count: number, timeoutMs = 15_000): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (this.inbound.length < count) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw new Error(`timeout waiting for ${count} mailbox messages`);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`timeout waiting for ${count} mailbox messages`)), remaining);
+        this.waiters.push(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+  }
+}
+
+function registered(jid: string, name: string): RegisteredAgent {
+  const manifest: AgentApiManifest = {
+    specVersion: AGENT_API_NS,
+    agent: { jid, name, title: name, description: `${name} integration agent`, version: '1.0.0' },
+    capabilities: { tools: { listChanged: false }, progress: true, cancellation: true, inputRequired: true, structuredOutput: true },
+    operations: [{
+      name: 'echo',
+      title: 'Echo',
+      description: 'Echo input',
+      inputSchema: { type: 'object', required: ['text'], properties: { text: { type: 'string' } } },
+      outputSchema: { type: 'object', required: ['echo'], properties: { echo: { type: 'string' } } },
+      annotations: { readOnlyHint: true, idempotentHint: true },
+    }],
+  };
+  return {
+    manifest,
+    manifestDigest: `digest-${name}`,
+    availability: 'available',
+    tenantId: 'integration-tenant',
+    registeredAt: new Date().toISOString(),
+    operations: [{
+      ...manifest.operations[0],
+      inputSchemaDigest: `input-${name}`,
+      outputSchemaDigest: `output-${name}`,
+    }],
+  };
+}
+
+function child(stanza: Element, name: string, xmlns: string): Element | undefined {
+  return stanza.getChild(name, xmlns) ?? undefined;
+}
+
+async function main(): Promise<void> {
+  const config = await startOpenfireOnly();
+  const componentJid = config.gatewayJid;
+  const agents = [registered(`alpha@${componentJid}`, 'alpha'), registered(`beta@${componentJid}`, 'beta')];
+  const mailbox = new MailboxSpy();
+  const iqHandler = (stanza: Element): Element | null => {
+    if (isPingRequest(stanza) && [componentJid, ...agents.map((a) => a.manifest.agent.jid)].includes(String(stanza.attrs.to))) {
+      return buildPingResponse(stanza);
+    }
+    const query = stanza.getChild('query');
+    const to = String(stanza.attrs.to ?? '').split('/')[0];
+    if (stanza.attrs.type !== 'get') return null;
+    const schema = stanza.getChild('schema', AGENT_API_NS);
+    if (schema) {
+      const agent = agents.find((candidate) => candidate.manifest.agent.jid === to);
+      const operation = agent?.operations.find((candidate) => candidate.name === schema.attrs.operation);
+      return agent && operation
+        ? buildSchemaResult(stanza, agent, operation, schema.attrs.direction === 'output' ? 'output' : 'input')
+        : null;
+    }
+    if (!query) return null;
+    if (query.attrs.xmlns === DISCO_INFO_NS && to === componentJid) return buildGatewayInfo(stanza, componentJid);
+    if (query.attrs.xmlns === DISCO_ITEMS_NS && query.attrs.node === AGENT_DIRECTORY_NS) {
+      return buildAgentDirectory(stanza, componentJid, agents);
+    }
+    const agent = agents.find((candidate) => candidate.manifest.agent.jid === to);
+    if (agent && query.attrs.xmlns === DISCO_INFO_NS && query.attrs.node === MCP_ENDPOINT_NS) {
+      return buildAgentInfo(stanza, agent);
+    }
+    if (agent && query.attrs.xmlns === DISCO_ITEMS_NS && query.attrs.node === AGENT_API_NS) {
+      return buildOperationItems(stanza, agent);
+    }
+    const operationName = operationFromNode(String(query.attrs.node ?? ''));
+    const operation = operationName ? agent?.operations.find((candidate) => candidate.name === operationName) : undefined;
+    if (agent && operation && query.attrs.xmlns === DISCO_INFO_NS) return buildOperationInfo(stanza, agent, operation);
+    return null;
+  };
+  const gateway = new EmbeddedXmppGateway({
+    gatewayId: 'integration',
+    componentJid,
+    agentDomain: componentJid,
+    componentService: `xmpp://127.0.0.1:${config.componentPort}`,
+    c2sService: config.xmppService,
+    componentSecret: 'component-secret',
+    dataDir: config.gatewayDataDir,
+    defaultAgentJid: agents[0].manifest.agent.jid,
+  }, mailbox, iqHandler);
+  const user = new XmppSession({ service: config.xmppService, domain: config.xmppDomain, username: 'john', password: 'secret' });
+  let peer: XmppSession | null = null;
+
+  try {
+    await gateway.start();
+    await user.start();
+
+    process.env.XMPP_PINGER_USER = 'peer-agent';
+    process.env.XMPP_PINGER_PASS = 'peer-secret';
+    await runOpenfireBootstrap(config);
+    peer = new XmppSession({ service: config.xmppService, domain: config.xmppDomain, username: 'peer-agent', password: 'peer-secret' });
+    await peer.start();
+
+    for (const to of [componentJid, agents[0].manifest.agent.jid, agents[1].manifest.agent.jid]) {
+      const id = `ping-${to}-${Date.now()}`;
+      const response = user.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.type === 'result' && stanza.attrs.id === id);
+      await user.send(xml('iq', { type: 'get', id, to }, xml('ping', { xmlns: PING_NS })));
+      assert.equal((await response).attrs.from, to);
+    }
+
+    await user.sendChat(agents[0].manifest.agent.jid, 'for alpha', 'alpha-message');
+    await user.sendChat(agents[1].manifest.agent.jid, 'for beta', 'beta-message');
+    await mailbox.waitForInbound(2);
+    assert.deepEqual(mailbox.inbound.map((message) => [message.agentJid, message.message.content.text]), [
+      [agents[0].manifest.agent.jid, 'for alpha'],
+      [agents[1].manifest.agent.jid, 'for beta'],
+    ]);
+
+    await gateway.deliver({
+      from: agents[0].manifest.agent.jid,
+      to: agents[1].manifest.agent.jid,
+      content: 'alpha to beta',
+    });
+    await mailbox.waitForInbound(3);
+    assert.equal(mailbox.inbound[2].agentJid, agents[1].manifest.agent.jid);
+    assert.equal(mailbox.inbound[2].platformId, agents[0].manifest.agent.jid);
+    assert.equal(mailbox.inbound[2].message.content.text, 'alpha to beta');
+
+    const reply = user.waitForBody('alpha reply');
+    await gateway.deliver({
+      from: agents[0].manifest.agent.jid,
+      to: config.pingerJid,
+      content: 'alpha reply',
+    });
+    assert.equal((await reply).attrs.from, agents[0].manifest.agent.jid);
+
+    const directoryId = `directory-${Date.now()}`;
+    const gatewayInfoId = `gateway-info-${Date.now()}`;
+    const gatewayInfo = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === gatewayInfoId);
+    await peer.send(xml('iq', { type: 'get', id: gatewayInfoId, to: componentJid }, xml('query', { xmlns: DISCO_INFO_NS })));
+    const gatewayFeatures = child(await gatewayInfo, 'query', DISCO_INFO_NS)?.getChildren('feature').map((feature) => feature.attrs.var) ?? [];
+    assert.ok(gatewayFeatures.includes(AGENT_API_NS));
+    assert.ok(gatewayFeatures.includes(AGENT_DIRECTORY_NS));
+
+    const directory = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === directoryId);
+    await peer.send(xml('iq', { type: 'get', id: directoryId, to: componentJid }, xml('query', { xmlns: DISCO_ITEMS_NS, node: AGENT_DIRECTORY_NS })));
+    const items = child(await directory, 'query', DISCO_ITEMS_NS)?.getChildren('item') ?? [];
+    assert.deepEqual(items.map((item) => item.attrs.jid), agents.map((agent) => agent.manifest.agent.jid));
+
+    const infoId = `info-${Date.now()}`;
+    const info = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === infoId);
+    await peer.send(xml('iq', { type: 'get', id: infoId, to: agents[1].manifest.agent.jid }, xml('query', { xmlns: DISCO_INFO_NS, node: MCP_ENDPOINT_NS })));
+    const endpointQuery = child(await info, 'query', DISCO_INFO_NS);
+    assert.equal(endpointQuery?.getChild('identity')?.attrs.type, 'mcp-endpoint');
+    assert.ok(endpointQuery?.toString().includes('manifest_digest'));
+    assert.ok(endpointQuery?.toString().includes('digest-beta'));
+
+    const operationListId = `operations-${Date.now()}`;
+    const operationList = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === operationListId);
+    await peer.send(xml('iq', { type: 'get', id: operationListId, to: agents[1].manifest.agent.jid }, xml('query', { xmlns: DISCO_ITEMS_NS, node: AGENT_API_NS })));
+    const operationItem = child(await operationList, 'query', DISCO_ITEMS_NS)?.getChild('item');
+    assert.equal(operationFromNode(String(operationItem?.attrs.node)), 'echo');
+
+    const operationInfoId = `operation-info-${Date.now()}`;
+    const operationInfo = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === operationInfoId);
+    await peer.send(xml('iq', { type: 'get', id: operationInfoId, to: agents[1].manifest.agent.jid }, xml('query', { xmlns: DISCO_INFO_NS, node: operationItem?.attrs.node })));
+    const operationXml = (await operationInfo).toString();
+    assert.ok(operationXml.includes(AGENT_OPERATION_NS));
+    assert.ok(operationXml.includes('input-beta'));
+    assert.ok(operationXml.includes('idempotent'));
+
+    for (const direction of ['input', 'output'] as const) {
+      const schemaId = `schema-${direction}-${Date.now()}`;
+      const schemaResult = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === schemaId);
+      await peer.send(xml('iq', { type: 'get', id: schemaId, to: agents[1].manifest.agent.jid }, xml('schema', { xmlns: AGENT_API_NS, operation: 'echo', direction })));
+      const schema = child(await schemaResult, 'schema', AGENT_API_NS);
+      assert.equal(schema?.attrs.digest, `${direction}-beta`);
+      assert.equal(JSON.parse(schema?.getText() ?? '{}').type, 'object');
+    }
+
+    assert.equal(mailbox.inbound.length, 3, 'IQ ping and discovery must not wake agents');
+    console.log('[e2e] embedded gateway: gateway/agent ping, human/agent, agent/human, agent/agent, and discovery passed');
+  } finally {
+    await user.stop().catch(() => undefined);
+    await peer?.stop().catch(() => undefined);
+    await gateway.stop().catch(() => undefined);
+    await stopOpenfireOnly();
+  }
+}
+
+main().catch((error) => {
+  console.error('[e2e] embedded gateway failed:', error);
+  process.exitCode = 1;
+});

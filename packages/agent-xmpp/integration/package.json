@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "e2e:embedded": "node ../../../node_modules/tsx/dist/cli.mjs e2e-embedded-gateway.ts",
     "e2e:ping": "node ../../../node_modules/tsx/dist/cli.mjs e2e-ping.ts",
     "e2e:api": "node ../../../node_modules/tsx/dist/cli.mjs e2e-api-surface.ts",
     "e2e:provision": "node ../../../node_modules/tsx/dist/cli.mjs e2e-provision-identity.ts",
@@ -16,6 +17,7 @@
     "bootstrap": "node ../../../node_modules/tsx/dist/cli.mjs bootstrap-openfire.ts"
   },
   "dependencies": {
+    "@agent-xmpp/gateway": "workspace:*",
     "@agent-xmpp/protocol": "workspace:*",
     "@xmpp/client": "0.14.0",
     "@xmpp/xml": "0.14.0",
