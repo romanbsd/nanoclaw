@@ -4,9 +4,13 @@ import { xml } from '@xmpp/xml';
 import { buildJoinPresence, buildRoomMessage, isMucJid } from './muc.js';
 import { buildReceivedReceipt, isAckOrReceiptStanza, requestsReceipt } from './receipts.js';
 import { stanzaToAgentMessage } from './message.js';
+import { buildGatewayInfo, DISCO_INFO_NS } from '../agent-api-disco.js';
+import { buildIqError, dispositionForStanza } from '../xmpp-component.js';
 
 const RECEIPTS_NS = 'urn:xmpp:receipts';
 const MENTIONS_NS = 'urn:xmpp:mentions:0';
+const MUC_NS = 'http://jabber.org/protocol/muc';
+const STANZA_ERROR_NS = 'urn:ietf:params:xml:ns:xmpp-stanzas';
 
 describe('muc plugin', () => {
   it('builds join presence', () => {
@@ -22,6 +26,62 @@ describe('muc plugin', () => {
   it('builds groupchat message', () => {
     const m = buildRoomMessage({ roomJid: 'room@conference.test', body: 'hi' }, 'bot@agents.test');
     expect(m.attrs.type).toBe('groupchat');
+  });
+
+  it('requests zero history on join so the agent is not flooded (XEP-0045 §7.2.2)', () => {
+    const p = buildJoinPresence({ roomJid: 'room@conference.test' }, 'bot@agents.test');
+    const history = p.getChild('x', MUC_NS)?.getChild('history');
+    expect(history?.attrs.maxstanzas).toBe('0');
+  });
+});
+
+describe('disco features (XEP-0030)', () => {
+  it('advertises the standard XEPs the gateway implements', () => {
+    const req = xml('iq', { type: 'get', from: 'peer@test', to: 'gw.test', id: 'd1' }, xml('query', { xmlns: DISCO_INFO_NS }));
+    const info = buildGatewayInfo(req, 'gw.test');
+    const advertised = info
+      .getChild('query', DISCO_INFO_NS)!
+      .getChildren('feature')
+      .map((f) => f.attrs.var);
+    for (const ns of ['urn:xmpp:ping', 'urn:xmpp:receipts', 'http://jabber.org/protocol/chatstates', 'urn:xmpp:reply:0']) {
+      expect(advertised).toContain(ns);
+    }
+  });
+});
+
+describe('IQ error fallback (RFC 6120 §8.2.3)', () => {
+  it('returns service-unavailable for an unhandled get', () => {
+    const req = xml('iq', { type: 'get', from: 'a@b', to: 'gw.test', id: 'q1' }, xml('unknown', { xmlns: 'urn:example:nope' }));
+    const err = buildIqError(req);
+    expect(err.attrs.type).toBe('error');
+    expect(err.attrs.id).toBe('q1');
+    expect(err.attrs.to).toBe('a@b');
+    expect(err.getChild('error')?.getChild('service-unavailable', STANZA_ERROR_NS)).toBeDefined();
+  });
+});
+
+describe('component IQ dispatch (dispositionForStanza)', () => {
+  const iq = (type: string) => xml('iq', { type, from: 'a@b', to: 'gw.test', id: 'x' });
+
+  it('errors on an unhandled get/set request', () => {
+    expect(dispositionForStanza(iq('get')).kind).toBe('error');
+    expect(dispositionForStanza(iq('set')).kind).toBe('error');
+  });
+
+  it('responds when a handler produces a reply', () => {
+    const d = dispositionForStanza(iq('get'), (s) => xml('iq', { type: 'result', id: s.attrs.id }));
+    expect(d.kind).toBe('respond');
+  });
+
+  it('dispatches IQ result/error responses to stanza handlers (no regression)', () => {
+    // Responses to our own outbound IQs must reach onStanza consumers, not be swallowed.
+    expect(dispositionForStanza(iq('result')).kind).toBe('dispatch');
+    expect(dispositionForStanza(iq('error')).kind).toBe('dispatch');
+  });
+
+  it('dispatches message/presence stanzas', () => {
+    expect(dispositionForStanza(xml('message', { from: 'a@b' })).kind).toBe('dispatch');
+    expect(dispositionForStanza(xml('presence', { from: 'a@b' })).kind).toBe('dispatch');
   });
 });
 

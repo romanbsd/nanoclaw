@@ -35,6 +35,21 @@ function features(...values: string[]): Element[] {
   return values.map((value) => xml('feature', { var: value }));
 }
 
+/**
+ * Standard XEP namespaces the gateway and its agents actually implement, so peers
+ * can capability-negotiate (XEP-0030). Keep in sync with the plugins in ./xep-plugins.
+ */
+const STANDARD_FEATURES = [
+  'urn:xmpp:ping', // XEP-0199
+  'urn:xmpp:receipts', // XEP-0184
+  'urn:xmpp:chat-markers:0', // XEP-0333
+  'http://jabber.org/protocol/chatstates', // XEP-0085
+  'urn:xmpp:reply:0', // XEP-0461
+  'jabber:x:data', // XEP-0004
+  'urn:xmpp:sid:0', // XEP-0359
+  'urn:xmpp:hints', // XEP-0334
+];
+
 export function buildGatewayInfo(request: Element, componentJid: string): Element {
   return resultIq(
     request,
@@ -43,7 +58,15 @@ export function buildGatewayInfo(request: Element, componentJid: string): Elemen
       'query',
       { xmlns: DISCO_INFO_NS },
       xml('identity', { category: 'automation', type: 'agent-gateway', name: 'NanoClaw XMPP Agent Gateway' }),
-      ...features(DISCO_INFO_NS, DISCO_ITEMS_NS, AGENT_DIRECTORY_NS, AGENT_API_NS, AGENT_TASK_NS, MCP_ENDPOINT_NS),
+      ...features(
+        DISCO_INFO_NS,
+        DISCO_ITEMS_NS,
+        AGENT_DIRECTORY_NS,
+        AGENT_API_NS,
+        AGENT_TASK_NS,
+        MCP_ENDPOINT_NS,
+        ...STANDARD_FEATURES,
+      ),
     ),
   );
 }
@@ -76,7 +99,7 @@ export function buildAgentInfo(request: Element, agent: RegisteredAgent): Elemen
       'query',
       { xmlns: DISCO_INFO_NS, ...(requestedNode ? { node: requestedNode } : {}) },
       xml('identity', { category: 'automation', type: 'mcp-endpoint', name: identity.title ?? identity.name }),
-      ...features(MCP_ENDPOINT_NS, AGENT_API_NS, AGENT_TASK_NS, VCARD_TEMP_NS),
+      ...features(MCP_ENDPOINT_NS, AGENT_API_NS, AGENT_TASK_NS, VCARD_TEMP_NS, ...STANDARD_FEATURES),
       resultForm('urn:businessos:mcp-endpoint-info:1', [
         field('endpoint_id', `xmpp+mcp://${identity.jid}`),
         field('server_name', identity.name),

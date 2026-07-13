@@ -30,11 +30,13 @@ export interface XmppSendRoomMessageInput {
 export function buildJoinPresence(input: XmppJoinRoomInput, agentJid: string): Element {
   const nick = input.nickname || agentJid.split('@')[0];
   const roomWithNick = `${input.roomJid}/${nick}`;
-  const children: Element[] = [xml('x', { xmlns: MUC_NS })];
+  // XEP-0045 §7.2.2: request zero history so joining doesn't flood the agent
+  // with the room's backlog as fresh inbound messages.
+  const mucChildren: Element[] = [xml('history', { maxstanzas: '0' })];
   if (input.password) {
-    children[0] = xml('x', { xmlns: MUC_NS }, xml('password', {}, input.password));
+    mucChildren.unshift(xml('password', {}, input.password));
   }
-  return xml('presence', { to: roomWithNick, from: agentJid }, ...children);
+  return xml('presence', { to: roomWithNick, from: agentJid }, xml('x', { xmlns: MUC_NS }, ...mucChildren));
 }
 
 export function buildLeavePresence(input: XmppLeaveRoomInput, agentJid: string, nickname?: string): Element {
