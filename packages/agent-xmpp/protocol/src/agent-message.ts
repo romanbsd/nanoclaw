@@ -129,6 +129,8 @@ export interface AskQuestionPayload {
 /** Bridge webhook payload: routing + normalized message for NanoClaw. */
 export interface BridgeInboundPayload {
   platformId: string;
+  /** Full sender JID used for replies and chat states; routing still uses platformId. */
+  replyTo?: string;
   threadId: string | null;
   message: {
     id: string;

@@ -21,18 +21,31 @@ import {
 import { parseAskQuestionSubmit } from './xep-plugins/data-form.js';
 import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
 import { parseTaskEvent, parseTaskInvocation } from './task-stanza-codec.js';
+import { presenceResponses, type VirtualAgentIdentity } from './xep-plugins/presence.js';
 
 export type SendStanzaFn = (stanza: Element) => Promise<void>;
 export type SendForAgentFn = (agentJid: string, stanza: Element) => Promise<void>;
+export type ResolveVirtualAgentFn = (jid: string) => VirtualAgentIdentity | null;
 
 export class StanzaRouter {
   constructor(
     private config: GatewayConfig,
     private mailbox: GatewayRuntimeMailbox,
     private sendForAgent: SendForAgentFn,
+    private resolveVirtualAgent?: ResolveVirtualAgentFn,
   ) {}
 
   async handleIncoming(stanza: Element): Promise<void> {
+    if (stanza.name === 'presence') {
+      const to = bareJid(String(stanza.attrs.to ?? ''));
+      const agent = this.resolveVirtualAgent?.(to);
+      if (agent) {
+        for (const response of presenceResponses(stanza, agent)) {
+          await this.sendForAgent(agent.jid, response);
+        }
+      }
+      return;
+    }
     if (stanza.name !== 'message') return;
 
     const toBare = (stanza.attrs.to as string)?.split('/')[0] || '';

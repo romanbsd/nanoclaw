@@ -69,6 +69,9 @@ export function buildBridgePayload(
 
   return {
     platformId,
+    // RFC 6121 section 8.5.2.1: reply to the originating resource. Keeping
+    // routing on the bare JID avoids creating one NanoClaw session per client.
+    replyTo: isGroup ? undefined : from,
     threadId,
     agentJid,
     message: {

@@ -43,6 +43,9 @@ function createAdapter(): ChannelAdapter | null {
         instance: payload.agentJid,
         platformId: payload.platformId,
         threadId: payload.threadId,
+        replyTo: payload.replyTo
+          ? { channelType: 'xmpp', instance: payload.agentJid, platformId: payload.replyTo, threadId: payload.threadId }
+          : undefined,
         message: {
           id: inbound.id,
           kind: inbound.kind,
@@ -84,7 +87,14 @@ function createAdapter(): ChannelAdapter | null {
 
     async setup(channelSetup) {
       setup = channelSetup;
-      gateway = new EmbeddedXmppGateway(gatewayConfig, mailbox, handleIq);
+      gateway = new EmbeddedXmppGateway(gatewayConfig, mailbox, handleIq, (jid) => {
+        const agent = store.getAgent(jid);
+        if (!agent) return null;
+        return {
+          jid: agent.manifest.agent.jid,
+          name: agent.manifest.agent.title ?? agent.manifest.agent.name,
+        };
+      });
       await gateway.start();
       log.info('Embedded XMPP gateway started');
     },
@@ -105,7 +115,7 @@ function createAdapter(): ChannelAdapter | null {
     },
 
     async clearTyping(platformId, threadId, senderIdentity) {
-      if (gateway && senderIdentity) await gateway.setTyping(senderIdentity, platformId, threadId, 'paused');
+      if (gateway && senderIdentity) await gateway.setTyping(senderIdentity, platformId, threadId, 'inactive');
     },
 
     resolveSenderIdentity(agentGroupId) {

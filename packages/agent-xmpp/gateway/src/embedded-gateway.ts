@@ -4,8 +4,8 @@ import type { Element } from '@xmpp/xml';
 import type { GatewayConfig } from './config.js';
 export { loadConfig } from './config.js';
 export type { GatewayConfig } from './config.js';
-import { sendComposingForAgent, sendPausedForAgent } from './agent-send.js';
-import { StanzaRouter } from './stanza-router.js';
+import { sendComposingForAgent, sendInactiveForAgent, sendPausedForAgent } from './agent-send.js';
+import { StanzaRouter, type ResolveVirtualAgentFn } from './stanza-router.js';
 import type { GatewayRuntimeMailbox } from './runtime-mailbox.js';
 import { applyStoreHints, buildOutboundStanza } from './xep-plugins/message.js';
 import { isMucJid } from './xep-plugins/muc.js';
@@ -21,13 +21,14 @@ export class EmbeddedXmppGateway {
     private readonly config: GatewayConfig,
     private readonly mailbox: GatewayRuntimeMailbox,
     private readonly onIqGet?: IqGetHandler,
+    private readonly resolveVirtualAgent?: ResolveVirtualAgentFn,
   ) {}
 
   async start(): Promise<void> {
     if (this.session) return;
     const session = createComponentSession(this.config, this.onIqGet);
     const sendForAgent = async (_agentJid: string, stanza: Element) => session.send(stanza);
-    const router = new StanzaRouter(this.config, this.mailbox, sendForAgent);
+    const router = new StanzaRouter(this.config, this.mailbox, sendForAgent, this.resolveVirtualAgent);
     session.onStanza((stanza) => void router.handleIncoming(stanza));
     await session.start();
     this.session = session;
@@ -64,11 +65,17 @@ export class EmbeddedXmppGateway {
     return String(stanza.attrs.id ?? '');
   }
 
-  async setTyping(from: string, to: string, threadId: string | null, state: 'composing' | 'paused'): Promise<void> {
+  async setTyping(
+    from: string,
+    to: string,
+    threadId: string | null,
+    state: 'composing' | 'paused' | 'inactive',
+  ): Promise<void> {
     const session = this.requiredSession();
     const targets = { to, threadId, groupchat: isMucJid(to) };
     const send = (stanza: Element) => session.send(stanza);
-    if (state === 'paused') await sendPausedForAgent(send, from, targets);
+    if (state === 'inactive') await sendInactiveForAgent(send, from, targets);
+    else if (state === 'paused') await sendPausedForAgent(send, from, targets);
     else await sendComposingForAgent(send, from, targets);
   }
 
@@ -83,3 +90,5 @@ export type { Element } from '@xmpp/xml';
 export * from './agent-api-disco.js';
 export * from './task-stanza-codec.js';
 export * from './xep-plugins/ping.js';
+export * from './xep-plugins/presence.js';
+export * from './xep-plugins/vcard.js';

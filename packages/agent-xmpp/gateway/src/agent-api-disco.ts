@@ -8,6 +8,7 @@
  */
 import type { AgentApiManifest, RegisteredAgent, RegisteredOperation } from '@agent-xmpp/protocol';
 import { xml, type Element } from '@xmpp/xml';
+import { VCARD_TEMP_NS } from './xep-plugins/vcard.js';
 
 export const DISCO_INFO_NS = 'http://jabber.org/protocol/disco#info';
 export const DISCO_ITEMS_NS = 'http://jabber.org/protocol/disco#items';
@@ -67,14 +68,15 @@ export function buildAgentDirectory(request: Element, componentJid: string, agen
 
 export function buildAgentInfo(request: Element, agent: RegisteredAgent): Element {
   const identity = agent.manifest.agent;
+  const requestedNode = request.getChild('query', DISCO_INFO_NS)?.attrs.node;
   return resultIq(
     request,
     identity.jid,
     xml(
       'query',
-      { xmlns: DISCO_INFO_NS, node: MCP_ENDPOINT_NS },
+      { xmlns: DISCO_INFO_NS, ...(requestedNode ? { node: requestedNode } : {}) },
       xml('identity', { category: 'automation', type: 'mcp-endpoint', name: identity.title ?? identity.name }),
-      ...features(MCP_ENDPOINT_NS, AGENT_API_NS, AGENT_TASK_NS),
+      ...features(MCP_ENDPOINT_NS, AGENT_API_NS, AGENT_TASK_NS, VCARD_TEMP_NS),
       resultForm('urn:businessos:mcp-endpoint-info:1', [
         field('endpoint_id', `xmpp+mcp://${identity.jid}`),
         field('server_name', identity.name),

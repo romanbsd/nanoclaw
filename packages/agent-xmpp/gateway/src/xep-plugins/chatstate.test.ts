@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildComposingStanza, isChatStateStanza } from './chatstate.js';
+import { buildComposingStanza, buildInactiveStanza, isChatStateStanza } from './chatstate.js';
 
 describe('chatstate plugin', () => {
   it('builds a DM composing stanza', () => {
@@ -32,5 +32,21 @@ describe('chatstate plugin', () => {
       to: 'agent@agents.test',
     });
     expect(isChatStateStanza(stanza)).toBe(true);
+  });
+
+  it('builds an inactive stanza to terminate composing state', () => {
+    const stanza = buildInactiveStanza({
+      from: 'agent@agents.test',
+      to: 'human@example.com',
+    });
+    expect(stanza.getChild('inactive', 'http://jabber.org/protocol/chatstates')).not.toBeNull();
+  });
+
+  it('sends chat state to the originating full JID', () => {
+    const stanza = buildInactiveStanza({
+      from: 'agent@agents.test',
+      to: 'human@example.com/client-1',
+    });
+    expect(stanza.attrs.to).toBe('human@example.com/client-1');
   });
 });

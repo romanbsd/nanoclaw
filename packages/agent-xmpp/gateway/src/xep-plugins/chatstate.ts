@@ -38,14 +38,24 @@ export function buildPausedStanza(opts: {
   return buildChatStateStanza({ ...opts, state: 'paused' });
 }
 
+export function buildInactiveStanza(opts: {
+  from: string;
+  to: string;
+  threadId?: string | null;
+  groupchat?: boolean;
+}): Element {
+  return buildChatStateStanza({ ...opts, state: 'inactive' });
+}
+
 function buildChatStateStanza(opts: {
   from: string;
   to: string;
   threadId?: string | null;
   groupchat?: boolean;
-  state: 'composing' | 'paused';
+  state: 'composing' | 'paused' | 'inactive';
 }): Element {
-  const to = bareJid(opts.to);
+  // XEP-0085 states belong to the same 1:1 resource as the chat response.
+  const to = opts.groupchat ? bareJid(opts.to) : opts.to;
   const type = opts.groupchat ? 'groupchat' : 'chat';
   const children: Element[] = [xml(opts.state, { xmlns: CHATSTATES_NS })];
   if (opts.threadId) {

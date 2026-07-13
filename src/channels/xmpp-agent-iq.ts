@@ -8,6 +8,7 @@ import {
   buildAgentInfo,
   buildGatewayInfo,
   buildManifestRegistrationResult,
+  buildAgentVcard,
   buildOperationInfo,
   buildOperationItems,
   buildPingResponse,
@@ -15,6 +16,7 @@ import {
   isPingRequest,
   operationFromNode,
   parseManifestRegistration,
+  VCARD_TEMP_NS,
   type Element,
 } from '@agent-xmpp/gateway';
 
@@ -35,6 +37,7 @@ export function createXmppAgentIqHandler(options: XmppAgentIqOptions): (stanza: 
     const info = stanza.getChild('query', DISCO_INFO_NS);
     const items = stanza.getChild('query', DISCO_ITEMS_NS);
     const schema = stanza.getChild('schema', AGENT_API_NS);
+    const vcard = stanza.getChild('vCard', VCARD_TEMP_NS);
     const tenant = options.tenantForSender(from);
 
     if (isPingRequest(stanza) && (to === options.componentJid || store.getAgent(to))) {
@@ -51,8 +54,12 @@ export function createXmppAgentIqHandler(options: XmppAgentIqOptions): (stanza: 
       return buildAgentDirectory(stanza, options.componentJid, store.listAgents(tenant));
     }
     const agent = store.getAgent(to);
-    if (!agent || agent.tenantId !== tenant) return null;
-    if (info?.attrs.node === MCP_ENDPOINT_NS) return buildAgentInfo(stanza, agent);
+    if (!agent) return null;
+    // XEP-0054 identity is public like ordinary roster vCards; API discovery
+    // and invocation metadata remain tenant-scoped below.
+    if (vcard && stanza.attrs.type === 'get') return buildAgentVcard(stanza, agent);
+    if (agent.tenantId !== tenant) return null;
+    if (info && (!info.attrs.node || info.attrs.node === MCP_ENDPOINT_NS)) return buildAgentInfo(stanza, agent);
     if (items?.attrs.node === AGENT_API_NS) return buildOperationItems(stanza, agent);
     if (info?.attrs.node) {
       const operation = agent.operations.find((item) => item.name === operationFromNode(String(info.attrs.node)));

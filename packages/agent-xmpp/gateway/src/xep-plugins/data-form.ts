@@ -91,7 +91,8 @@ export function buildAskQuestionFormStanza(req: OutboundDeliverRequest, fromJid:
   }
 
   const isMuc = isMucJid(req.to);
-  const to = req.threadId && isMuc ? req.to : bareJid(req.to);
+  // RFC 6121 section 8.5.2.1: preserve the initiating resource for 1:1 replies.
+  const to = req.threadId && isMuc ? req.to : isMuc ? bareJid(req.to) : req.to;
   const type = isMuc ? 'groupchat' : 'chat';
 
   return xml('message', { type, id, to, from: fromJid }, ...children);

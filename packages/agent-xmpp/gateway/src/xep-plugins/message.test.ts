@@ -70,4 +70,12 @@ describe('message plugin', () => {
     expect(stanza.getChildText('body')).toContain('Proceed?');
     expect(stanza.getChild('payload', 'urn:xmpp:json-msg:0')).toBeUndefined();
   });
+
+  it('replies to the full JID that originated a DM', () => {
+    const stanza = buildOutboundStanza(
+      { from: 'agent@agents.test', to: 'human@example.com/client-1', content: 'Hello' },
+      'agent@agents.test',
+    );
+    expect(stanza.attrs.to).toBe('human@example.com/client-1');
+  });
 });

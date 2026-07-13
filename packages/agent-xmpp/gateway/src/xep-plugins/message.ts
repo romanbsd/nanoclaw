@@ -231,7 +231,9 @@ export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string
     ),
   );
 
-  const to = req.threadId && isMuc ? req.to : bareJid(req.to);
+  // RFC 6121 section 8.5.2.1: preserve a full JID when replying to the
+  // resource that originated a 1:1 chat. Proactive sends can still use bare JIDs.
+  const to = req.threadId && isMuc ? req.to : isMuc ? bareJid(req.to) : req.to;
   const type = isMuc ? 'groupchat' : 'chat';
 
   return xml('message', { type, id, to, from: fromJid }, ...children);

@@ -11,6 +11,7 @@ import {
   MCP_ENDPOINT_NS,
   EmbeddedXmppGateway,
   PING_NS,
+  VCARD_TEMP_NS,
   buildTaskInvocation,
   operationFromNode,
   parseTaskEvent,
@@ -127,7 +128,12 @@ async function main(): Promise<void> {
     componentService: `xmpp://127.0.0.1:${config.componentPort}`,
     componentSecret: 'component-secret',
     defaultAgentJid: agents[0].manifest.agent.jid,
-  }, mailbox, iqHandler);
+  }, mailbox, iqHandler, (jid) => {
+    const agent = store.getAgent(jid);
+    return agent
+      ? { jid: agent.manifest.agent.jid, name: agent.manifest.agent.title ?? agent.manifest.agent.name }
+      : null;
+  });
   const user = new XmppSession({ service: config.xmppService, domain: config.xmppDomain, username: 'john', password: 'secret' });
   let peer: XmppSession | null = null;
 
@@ -147,6 +153,26 @@ async function main(): Promise<void> {
       await user.send(xml('iq', { type: 'get', id, to }, xml('ping', { xmlns: PING_NS })));
       assert.equal((await response).attrs.from, to);
     }
+
+    const presence = user.waitForStanza(
+      (stanza) => stanza.is('presence') && stanza.attrs.from === agents[0].manifest.agent.jid && !stanza.attrs.type,
+    );
+    await user.send(xml('presence', {
+      type: 'probe',
+      to: agents[0].manifest.agent.jid,
+    }));
+    assert.equal((await presence).getChildText('show'), 'chat');
+
+    const vcardId = `vcard-${Date.now()}`;
+    const vcard = user.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === vcardId);
+    await user.send(xml(
+      'iq',
+      { type: 'get', id: vcardId, to: agents[0].manifest.agent.jid },
+      xml('vCard', { xmlns: VCARD_TEMP_NS }),
+    ));
+    const card = child(await vcard, 'vCard', VCARD_TEMP_NS);
+    assert.equal(card?.getChildText('FN'), agents[0].manifest.agent.title);
+    assert.equal(card?.getChildText('JABBERID'), agents[0].manifest.agent.jid);
 
     await user.sendChat(agents[0].manifest.agent.jid, 'for alpha', 'alpha-message');
     await user.sendChat(agents[1].manifest.agent.jid, 'for beta', 'beta-message');
@@ -239,7 +265,7 @@ async function main(): Promise<void> {
     }
 
     assert.equal(mailbox.inbound.length, 3, 'IQ ping and discovery must not wake agents');
-    console.log('[e2e] embedded gateway: ping, human/agent, agent/agent, discovery, and remote task lifecycle passed');
+    console.log('[e2e] embedded gateway: ping, presence, vCard, human/agent, agent/agent, discovery, and remote task lifecycle passed');
   } finally {
     await user.stop().catch(() => undefined);
     await peer?.stop().catch(() => undefined);
