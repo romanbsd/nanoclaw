@@ -1,4 +1,18 @@
-/** XEP-0432-inspired JSON, XEP-0481, XEP-0461, XEP-0334, XEP-0359 */
+/**
+ * Message normalization and construction.
+ *
+ * The gateway JSON payload, content-type marker, and reply marker are inspired
+ * by XEP-0432, XEP-0481, and XEP-0461 rather than strict wire implementations;
+ * their current shapes are retained for compatibility. XEP-0334 processing
+ * hints and XEP-0359 origin IDs use their standard namespaces.
+ *
+ * @see https://xmpp.org/extensions/xep-0432.html
+ * @see https://xmpp.org/extensions/xep-0335.html
+ * @see https://xmpp.org/extensions/xep-0481.html
+ * @see https://xmpp.org/extensions/xep-0461.html
+ * @see https://xmpp.org/extensions/xep-0334.html
+ * @see https://xmpp.org/extensions/xep-0359.html
+ */
 
 import { createHash } from 'crypto';
 

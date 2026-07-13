@@ -1,4 +1,11 @@
-/** XEP-0184 Message Delivery Receipts, XEP-0333 Chat Markers */
+/**
+ * XEP-0184 Message Delivery Receipts and XEP-0333 Chat Markers.
+ * Bodyless XEP-0085 chat states are filtered by the same routing guard.
+ *
+ * @see https://xmpp.org/extensions/xep-0184.html
+ * @see https://xmpp.org/extensions/xep-0333.html
+ * @see https://xmpp.org/extensions/xep-0085.html
+ */
 
 import { xml, type Element } from '@xmpp/xml';
 

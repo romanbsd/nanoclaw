@@ -177,8 +177,7 @@ function ensurePreCompactHook(settingsFile: string, initialized: string[]): void
 
     fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2) + '\n');
     initialized.push('settings.json (added PreCompact hook)');
-    // eslint-disable-next-line no-catch-all/no-catch-all -- malformed settings must not block group init
-  } catch (err) {
-    log.warn('Failed to update settings.json during group init', { settingsFile, err });
+  } catch {
+    // Don't break init if settings.json is malformed — it'll use whatever's there.
   }
 }

@@ -1,3 +1,8 @@
+/**
+ * Plain-text @nick matching is the compatibility fallback for clients that do
+ * not send XEP-0513 Explicit Mentions.
+ * @see https://xmpp.org/extensions/xep-0513.html
+ */
 export function shouldDeliverInbound(stanzaType: string, isGroup: boolean, isMention: boolean): boolean {
   if (!isGroup) return true;
   return isMention;

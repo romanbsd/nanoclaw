@@ -1,4 +1,7 @@
-/** XEP-0199 XMPP Ping. */
+/**
+ * XEP-0199 XMPP Ping.
+ * @see https://xmpp.org/extensions/xep-0199.html
+ */
 import { xml, type Element } from '@xmpp/xml';
 
 export const PING_NS = 'urn:xmpp:ping';

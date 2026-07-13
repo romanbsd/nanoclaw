@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "build": "node ../../../node_modules/typescript/bin/tsc",
+    "build": "rm -rf dist && node ../../../node_modules/typescript/bin/tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

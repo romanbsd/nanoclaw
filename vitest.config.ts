@@ -1,13 +1,13 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-    test: {
+  test: {
     include: [
       'src/**/*.test.ts',
       'setup/**/*.test.ts',
       'scripts/**/*.test.ts',
       'container/*.test.ts',
-      'packages/agent-xmpp/**/*.test.ts',
+      'packages/**/*.test.ts',
     ],
   },
 });

@@ -40,13 +40,7 @@ export function resetCircuitBreaker(): void {
   try {
     fs.unlinkSync(CB_PATH);
     log.info('Circuit breaker reset on clean shutdown');
-    // eslint-disable-next-line no-catch-all/no-catch-all -- ENOENT is expected when marker already absent
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      log.warn('Failed to reset circuit breaker marker', { path: CB_PATH, err });
-    }
-  }
+  } catch {}
 }
 
 export async function enforceStartupBackoff(): Promise<void> {

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 import { GROUPS_DIR } from '../../../src/config.js';
 import {
@@ -67,7 +68,7 @@ export interface ProvisionNanoclawAgentResult {
 }
 
 function generateId(prefix: string): string {
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${prefix}-${randomUUID()}`;
 }
 
 function resolveFolder(agentId: string): string {

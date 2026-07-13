@@ -1,3 +1,7 @@
+/**
+ * External-component session using XEP-0114 Jabber Component Protocol.
+ * @see https://xmpp.org/extensions/xep-0114.html
+ */
 import { component } from '@xmpp/component';
 import { xml, type Element } from '@xmpp/xml';
 

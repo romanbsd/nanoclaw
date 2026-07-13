@@ -1,3 +1,11 @@
+/**
+ * Gateway-private agent-task extension transported in normal message stanzas.
+ * XEP-0359 supplies correlation IDs and XEP-0184 requests wire delivery receipts;
+ * the urn:businessos:agent-task:1 payload itself is not an XEP.
+ *
+ * @see https://xmpp.org/extensions/xep-0359.html
+ * @see https://xmpp.org/extensions/xep-0184.html
+ */
 import { AGENT_TASK_NS, type AgentTaskRecord } from '@agent-xmpp/protocol';
 import { xml, type Element } from '@xmpp/xml';
 

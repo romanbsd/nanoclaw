@@ -1,3 +1,11 @@
+/**
+ * Agent/MCP discovery is carried over XEP-0030 Service Discovery and uses
+ * XEP-0004 result forms for structured metadata. Agent nodes and fields are
+ * gateway extensions, not XSF-registered protocols.
+ *
+ * @see https://xmpp.org/extensions/xep-0030.html
+ * @see https://xmpp.org/extensions/xep-0004.html
+ */
 import type { AgentApiManifest, RegisteredAgent, RegisteredOperation } from '@agent-xmpp/protocol';
 import { xml, type Element } from '@xmpp/xml';
 

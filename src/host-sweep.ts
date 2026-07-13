@@ -187,9 +187,7 @@ async function sweepSession(session: Session): Promise<void> {
   let outDb: Database.Database | null = null;
   try {
     inDb = openInboundDb(agentGroup.id, session.id);
-    // eslint-disable-next-line no-catch-all/no-catch-all -- skip session when inbound.db is unreadable
-  } catch (err) {
-    log.warn('Host sweep: failed to open inbound.db', { sessionId: session.id, err });
+  } catch {
     return;
   }
 

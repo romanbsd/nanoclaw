@@ -24,17 +24,13 @@ for v in "${required_vars[@]}"; do
 done
 
 log "Installing workspace dependencies…"
-pnpm install >&2
-
-log "Building agent-xmpp packages…"
-pnpm --filter @agent-xmpp/protocol build >&2
-pnpm --filter @agent-xmpp/gateway build >&2
+pnpm install --frozen-lockfile >&2
 
 if ! grep -q "^import './xmpp-bridge.js';" src/channels/index.ts 2>/dev/null; then
   echo "import './xmpp-bridge.js';" >> src/channels/index.ts
 fi
 
-log "Building host…"
+log "Building XMPP packages and host…"
 pnpm run build >&2
 
 # Persist env keys to .env

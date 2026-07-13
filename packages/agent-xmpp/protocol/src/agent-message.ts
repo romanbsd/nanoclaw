@@ -169,7 +169,3 @@ export interface OutboundDeliverRequest {
   inReplyTo?: string;
   files?: Array<{ filename: string; dataBase64: string; mediaType?: string }>;
 }
-
-export interface OutboundDeliverResponse {
-  messageId: string;
-}

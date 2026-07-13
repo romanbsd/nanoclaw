@@ -1,4 +1,7 @@
-/** XEP-0085 Chat State Notifications */
+/**
+ * XEP-0085 Chat State Notifications.
+ * @see https://xmpp.org/extensions/xep-0085.html
+ */
 
 import { xml, type Element } from '@xmpp/xml';
 

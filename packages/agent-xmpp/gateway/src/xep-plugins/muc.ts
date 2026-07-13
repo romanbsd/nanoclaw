@@ -1,4 +1,11 @@
-/** XEP-0045 Multi-User Chat, XEP-0513 Explicit Mentions (basic) */
+/**
+ * XEP-0045 Multi-User Chat presence and groupchat messages.
+ * The existing gateway-private <mentions/> payload is not XEP-0513 wire format;
+ * XEP-0513 is the interoperability target for a future transport switch.
+ *
+ * @see https://xmpp.org/extensions/xep-0045.html
+ * @see https://xmpp.org/extensions/xep-0513.html
+ */
 
 import { xml, type Element } from '@xmpp/xml';
 

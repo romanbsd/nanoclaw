@@ -3,18 +3,11 @@
   "version": "1.0.0",
   "description": "XMPP agent identity provisioning via OpenFire REST API",
   "license": "ISC",
+  "private": true,
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
   "scripts": {
-    "build": "node ../../node_modules/typescript/bin/tsc",
-    "typecheck": "tsc --noEmit",
+    "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit --types node",
+    "typecheck": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit --types node",
     "test": "node ../../node_modules/vitest/vitest.mjs run",
     "start": "node ../../node_modules/tsx/dist/cli.mjs src/server.ts"
   },

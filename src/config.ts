@@ -55,9 +55,7 @@ export const MOUNT_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', '
 export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', 'sender-allowlist.json');
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
 export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = process.env.NANCLAW_DATA_DIR
-  ? path.resolve(process.env.NANCLAW_DATA_DIR)
-  : path.resolve(PROJECT_ROOT, 'data');
+export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
 // Local agent-template library. Committed but ships empty (+ README). Resolved
 // once at load. Override to another LOCAL path via NANOCLAW_TEMPLATES_DIR; never
 // a remote URL, never an ncl flag, never runtime-mutable.

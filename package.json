@@ -9,7 +9,7 @@
     "ncl": "bin/ncl"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf packages/agent-xmpp/protocol/dist packages/agent-xmpp/gateway/dist && tsc -p packages/agent-xmpp/protocol && tsc -p packages/agent-xmpp/gateway && tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",

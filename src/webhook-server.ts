@@ -146,7 +146,7 @@ function ensureServer(): void {
       const handler = webhooks[entry.adapterName];
       const webRes = await handler(webReq, {
         waitUntil: (p: Promise<unknown>) => {
-          p.catch((err) => log.error('Webhook waitUntil background task failed', { adapter: adapterName, err }));
+          p.catch(() => {});
         },
       });
       await fromWebResponse(webRes, res);

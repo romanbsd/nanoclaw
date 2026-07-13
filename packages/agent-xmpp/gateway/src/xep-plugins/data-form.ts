@@ -1,4 +1,12 @@
-/** XEP-0004 Data Forms — ask_user_question multiple-choice via list-single fields. */
+/**
+ * XEP-0004 Data Forms — ask_user_question multiple-choice via list-single fields.
+ * Outbound forms also carry XEP-0359 origin IDs. The optional reply marker uses
+ * the XEP-0461 namespace but retains the gateway's legacy no-`to` shape.
+ *
+ * @see https://xmpp.org/extensions/xep-0004.html
+ * @see https://xmpp.org/extensions/xep-0359.html
+ * @see https://xmpp.org/extensions/xep-0461.html
+ */
 
 import { xml, type Element } from '@xmpp/xml';
 import { ulid } from 'ulid';
