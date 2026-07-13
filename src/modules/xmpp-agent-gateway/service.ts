@@ -236,23 +236,21 @@ export class XmppAgentGatewayService {
           inputSchema,
         });
         this.store.transition(task.taskId, 'input_required');
-        const notified = this.respondToWaiters(task, {
-          requestId: task.correlationId,
-          ok: true,
-          result: {
-            taskId: task.taskId,
-            status: 'input_required',
-            requestId: inputRequestId,
-            question: request.payload.question,
-            inputSchema,
+        await this.settle(
+          task,
+          'input_required',
+          {
+            ok: true,
+            result: {
+              taskId: task.taskId,
+              status: 'input_required',
+              requestId: inputRequestId,
+              question: request.payload.question,
+              inputSchema,
+            },
           },
-        });
-        if (!notified)
-          await this.emitRemoteEvent(task, 'input_required', {
-            requestId: inputRequestId,
-            question: request.payload.question,
-            inputSchema,
-          });
+          { requestId: inputRequestId, question: request.payload.question, inputSchema },
+        );
         return { taskId: task.taskId, requestId: inputRequestId };
       }
       case 'task.complete': {
@@ -273,21 +271,12 @@ export class XmppAgentGatewayService {
           result: request.payload.result,
           summary: optionalString(request.payload.summary),
         });
-        const notified = this.respondToWaiters(completed, {
-          requestId: completed.correlationId,
-          ok: true,
-          result: {
-            taskId: completed.taskId,
-            status: completed.state,
-            structuredContent: completed.result,
-            summary: completed.summary,
-          },
-        });
-        if (!notified)
-          await this.emitRemoteEvent(completed, 'completed', {
-            result: completed.result,
-            summary: completed.summary,
-          });
+        await this.settle(
+          completed,
+          'completed',
+          { ok: true, result: taskResult(completed) },
+          { result: completed.result, summary: completed.summary },
+        );
         return { taskId: completed.taskId, status: completed.state };
       }
       case 'task.fail': {
@@ -300,24 +289,26 @@ export class XmppAgentGatewayService {
         };
         this.store.appendEvent({ type: 'failed', taskId: task.taskId, error });
         const failed = this.store.transition(task.taskId, 'failed', { error });
-        const notified = this.respondToWaiters(failed, {
-          requestId: failed.correlationId,
-          ok: false,
-          error: { code: error.code, message: error.message },
-        });
-        if (!notified) await this.emitRemoteEvent(failed, 'failed', { error });
+        await this.settle(
+          failed,
+          'failed',
+          { ok: false, error: { code: error.code, message: error.message } },
+          {
+            error,
+          },
+        );
         return { taskId: failed.taskId, status: failed.state };
       }
       case 'task.cancelled': {
         const task = this.targetTask(request.payload, principal.jid);
         this.store.appendEvent({ type: 'cancelled', taskId: task.taskId });
         const cancelled = this.store.transition(task.taskId, 'cancelled');
-        const notified = this.respondToWaiters(cancelled, {
-          requestId: cancelled.correlationId,
-          ok: true,
-          result: { taskId: cancelled.taskId, status: cancelled.state },
-        });
-        if (!notified) await this.emitRemoteEvent(cancelled, 'cancelled', {});
+        await this.settle(
+          cancelled,
+          'cancelled',
+          { ok: true, result: { taskId: cancelled.taskId, status: cancelled.state } },
+          {},
+        );
         return { taskId: cancelled.taskId, status: cancelled.state };
       }
     }
@@ -394,30 +385,23 @@ export class XmppAgentGatewayService {
   ): Promise<void> {
     const target = getAgentGroupByXmppJid(task.targetJid);
     if (!target) {
-      const adapter = getDeliveryAdapter();
-      if (!adapter) throw new Error('XMPP delivery adapter is unavailable');
       const wireType = event === 'task_cancel' ? 'cancel_requested' : event === 'task_input' ? 'input' : null;
-      await adapter.deliver(
-        'xmpp',
+      await this.deliverWire(
         task.targetJid,
+        task.callerJid,
         task.taskId,
         wireType ? 'agent-task-event' : 'agent-task',
-        JSON.stringify(
-          wireType
-            ? {
-                agentTaskEvent: {
-                  taskId: task.taskId,
-                  type: wireType,
-                  from: task.callerJid,
-                  to: task.targetJid,
-                  payload,
-                },
-              }
-            : { agentTask: task },
-        ),
-        undefined,
-        'xmpp',
-        task.callerJid,
+        wireType
+          ? {
+              agentTaskEvent: {
+                taskId: task.taskId,
+                type: wireType,
+                from: task.callerJid,
+                to: task.targetJid,
+                payload,
+              },
+            }
+          : { agentTask: task },
       );
       return;
     }
@@ -470,11 +454,7 @@ export class XmppAgentGatewayService {
   private authorizedTask(taskId: string, tenantId: string): AgentTaskRecord {
     let task = this.store.getTask(taskId);
     if (!task || task.tenantId !== tenantId) throw new Error('task not found');
-    if (
-      task.deadline &&
-      Date.parse(task.deadline) <= Date.now() &&
-      !['completed', 'failed', 'cancelled', 'rejected', 'timed_out'].includes(task.state)
-    ) {
+    if (task.deadline && Date.parse(task.deadline) <= Date.now() && !terminalTaskStates.has(task.state)) {
       task = this.store.transition(task.taskId, 'timed_out', {
         error: { code: 'deadline-exceeded', message: 'Task deadline exceeded', retryable: false },
       });
@@ -519,26 +499,45 @@ export class XmppAgentGatewayService {
     return waiters.length > 0;
   }
 
+  /**
+   * Settle a task lifecycle transition: hand the result to any local in-process
+   * waiters, and only if there are none, forward it as a remote wire event to the
+   * caller's XMPP JID. Shared by task.complete / fail / cancelled / request_input.
+   */
+  private async settle(
+    task: AgentTaskRecord,
+    wireType: TaskWireEvent['type'],
+    localResult:
+      | { ok: true; result: Record<string, unknown> }
+      | { ok: false; error: { code: string; message: string } },
+    remotePayload: Record<string, unknown>,
+  ): Promise<void> {
+    const notified = this.respondToWaiters(task, { requestId: task.correlationId, ...localResult });
+    if (!notified) await this.emitRemoteEvent(task, wireType, remotePayload);
+  }
+
   private async emitRemoteEvent(
     task: AgentTaskRecord,
     type: TaskWireEvent['type'],
     payload: Record<string, unknown>,
   ): Promise<void> {
     if (getAgentGroupByXmppJid(task.callerJid)) return;
+    await this.deliverWire(task.callerJid, task.targetJid, task.taskId, 'agent-task-event', {
+      agentTaskEvent: { taskId: task.taskId, type, from: task.targetJid, to: task.callerJid, payload },
+    });
+  }
+
+  /** Push a task invocation or lifecycle event onto the XMPP delivery adapter. */
+  private async deliverWire(
+    to: string,
+    from: string,
+    taskId: string,
+    kind: 'agent-task' | 'agent-task-event',
+    body: unknown,
+  ): Promise<void> {
     const adapter = getDeliveryAdapter();
     if (!adapter) throw new Error('XMPP delivery adapter is unavailable');
-    await adapter.deliver(
-      'xmpp',
-      task.callerJid,
-      task.taskId,
-      'agent-task-event',
-      JSON.stringify({
-        agentTaskEvent: { taskId: task.taskId, type, from: task.targetJid, to: task.callerJid, payload },
-      }),
-      undefined,
-      'xmpp',
-      task.targetJid,
-    );
+    await adapter.deliver('xmpp', to, taskId, kind, JSON.stringify(body), undefined, 'xmpp', from);
   }
 }
 

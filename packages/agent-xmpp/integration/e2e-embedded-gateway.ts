@@ -25,7 +25,13 @@ import { xml, type Element } from '@xmpp/xml';
 import { closeDb, getDb, initTestDb, runMigrations } from '../../../src/db/index.js';
 import { XmppAgentGatewayStore } from '../../../src/modules/xmpp-agent-gateway/store.js';
 import { createXmppAgentIqHandler } from '../../../src/channels/xmpp-agent-iq.js';
-import { runOpenfireBootstrap, startOpenfireOnly, stopOpenfireOnly } from './e2e-stack.js';
+import {
+  runOpenfireBootstrap,
+  startOpenfireOnly,
+  startOpenfireService,
+  stopOpenfireOnly,
+  stopOpenfireService,
+} from './e2e-stack.js';
 import { XmppSession } from './xmpp-session.js';
 
 const RECEIPTS_NS = 'urn:xmpp:receipts';
@@ -117,6 +123,15 @@ function child(stanza: Element, name: string, xmlns: string): Element | undefine
   return stanza.getChild(name, xmlns) ?? undefined;
 }
 
+async function waitForCondition(label: string, predicate: () => boolean, timeoutMs = 20_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Timed out waiting for ${label}`);
+}
+
 async function main(): Promise<void> {
   initTestDb();
   runMigrations(getDb());
@@ -138,12 +153,18 @@ async function main(): Promise<void> {
       gatewayId: 'integration',
       componentJid,
       agentDomain: componentJid,
+      serverDomain: config.xmppDomain,
       componentService: `xmpp://127.0.0.1:${config.componentPort}`,
       componentSecret: 'component-secret',
       defaultAgentJid: agents[0].manifest.agent.jid,
       receiptTimeoutMs: 250,
       receiptMaxResends: 1,
       receiptSweepMs: 50,
+      reconnectInitialMs: 100,
+      reconnectMaxMs: 1_000,
+      pingIntervalMs: 1_000,
+      pingTimeoutMs: 500,
+      pingFailureThreshold: 2,
     },
     mailbox,
     iqHandler,
@@ -442,9 +463,23 @@ async function main(): Promise<void> {
       assert.equal(JSON.parse(schema?.getText() ?? '{}').type, 'object');
     }
 
+    // Exercise the real transport boundary: Openfire closes the component
+    // socket, then returns with the same persisted configuration. The gateway
+    // must report offline, authenticate a fresh client, and complete an IQ.
+    await stopOpenfireService();
+    await waitForCondition('gateway to observe the Openfire outage', () => !gateway.isConnected());
+    await startOpenfireService(config);
+    await waitForCondition('gateway to reconnect to Openfire', () => gateway.isConnected());
+    const reconnectPing = xml(
+      'iq',
+      { type: 'get', from: agents[0].manifest.agent.jid, to: config.xmppDomain },
+      xml('ping', { xmlns: PING_NS }),
+    );
+    assert.equal((await gateway.requestIq(reconnectPing, { timeoutMs: 5_000 })).attrs.type, 'result');
+
     assert.equal(mailbox.inbound.length, 4, 'IQ ping and discovery must not wake agents');
     console.log(
-      '[e2e] embedded gateway: outbound IQ, ping, presence, receipts/restart, vCard, human/agent, agent/agent, discovery, and remote task lifecycle passed',
+      '[e2e] embedded gateway: outbound IQ, ping, reconnect, presence, receipts/restart, vCard, human/agent, agent/agent, discovery, and remote task lifecycle passed',
     );
   } finally {
     await user.stop().catch(() => undefined);

@@ -29,6 +29,12 @@ declare module '@xmpp/component' {
     on(event: 'error', handler: (error: Error) => void): this;
     on(event: 'offline', handler: () => void): this;
     on(event: 'online', handler: () => void): this;
+    on(event: 'disconnect', handler: () => void): this;
+    reconnect: {
+      stop(): void;
+    };
+    connect(service: string): Promise<void>;
+    open(options: { domain: string }): Promise<void>;
     send(stanza: Element): Promise<void>;
     start(): Promise<void>;
     stop(): Promise<void>;

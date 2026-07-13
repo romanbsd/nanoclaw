@@ -19,9 +19,18 @@ XMPP_AGENT_DOMAIN=agents.example
 XMPP_COMPONENT_SERVICE=xmpp://127.0.0.1:5275
 XMPP_COMPONENT_SECRET=component-secret
 XMPP_DEFAULT_AGENT_JID=assistant@agents.example
+
+# Optional connection supervision / XEP-0199 keepalive tuning
+XMPP_SERVER_DOMAIN=example
+XMPP_RECONNECT_INITIAL_MS=1000
+XMPP_RECONNECT_MAX_MS=60000
+XMPP_PING_INTERVAL_MS=60000
+XMPP_PING_TIMEOUT_MS=10000
+XMPP_PING_FAILURE_THRESHOLD=2
 ```
 
 Restart NanoClaw after changing these values. The channel adapter opens the component connection during normal host startup and closes it during normal host shutdown.
+Unexpected disconnects are recovered with capped exponential backoff and jitter. Idle connections are probed with XEP-0199; repeated ping failures force a fresh component connection. Outbound channel rows remain pending while their adapter is offline and do not consume the send-failure retry budget.
 
 ## Multi-agent model
 

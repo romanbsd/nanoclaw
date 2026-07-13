@@ -3,8 +3,6 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { resolveNode22Bin } from './resolve-node22.js';
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const REPO_ROOT = path.join(__dirname, '../../..');
 export const COMPOSE_FILE = path.join(__dirname, 'docker-compose.yml');
@@ -63,7 +61,7 @@ async function waitForUrl(url: string, timeoutMs = 180_000): Promise<void> {
 
 export async function runOpenfireBootstrap(config: Pick<E2eStackConfig, 'openfireUrl' | 'xmppDomain'>): Promise<void> {
   console.log('[e2e] bootstrapping Openfire...');
-  await run(resolveNode22Bin(), [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
+  await run(process.execPath, [path.join(REPO_ROOT, 'node_modules/tsx/dist/cli.mjs'), path.join(__dirname, 'bootstrap-openfire.ts')], {
     OPENFIRE_URL: config.openfireUrl,
     XMPP_DOMAIN: config.xmppDomain,
     E2E_HTTP_BIND_PORT: process.env.E2E_HTTP_BIND_PORT || '17070',
@@ -85,4 +83,15 @@ export async function startOpenfireOnly(): Promise<E2eStackConfig> {
 
 export async function stopOpenfireOnly(): Promise<void> {
   if (!process.env.KEEP_E2E) await compose('down', '-v').catch(() => undefined);
+}
+
+/** Stop only the server process while preserving its configured volume. */
+export async function stopOpenfireService(): Promise<void> {
+  await compose('stop', 'openfire');
+}
+
+/** Restart a previously configured server without rerunning destructive bootstrap. */
+export async function startOpenfireService(config: Pick<E2eStackConfig, 'openfireUrl'>): Promise<void> {
+  await compose('start', 'openfire');
+  await waitForUrl(`${config.openfireUrl}/login.jsp`);
 }

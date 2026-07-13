@@ -17,23 +17,33 @@ interface MockComponentClient {
     error?: ErrorHandler;
     offline?: OfflineHandler;
     online?: OfflineHandler;
+    disconnect?: OfflineHandler;
   };
   on: ReturnType<typeof vi.fn>;
   send: ReturnType<typeof vi.fn>;
+  connect: ReturnType<typeof vi.fn>;
+  open: ReturnType<typeof vi.fn>;
   start: ReturnType<typeof vi.fn>;
   stop: ReturnType<typeof vi.fn>;
+  reconnect: { stop: ReturnType<typeof vi.fn> };
 }
 
 const config: GatewayConfig = {
   gatewayId: 'test-gateway',
   componentJid: 'gateway.agents.test',
   agentDomain: 'agents.test',
+  serverDomain: 'test',
   componentService: 'xmpp://127.0.0.1:5275',
   componentSecret: 'secret',
   defaultAgentJid: 'assistant@agents.test',
   receiptTimeoutMs: 30_000,
   receiptMaxResends: 0,
   receiptSweepMs: 10_000,
+  reconnectInitialMs: 1_000,
+  reconnectMaxMs: 60_000,
+  pingIntervalMs: 60_000,
+  pingTimeoutMs: 10_000,
+  pingFailureThreshold: 2,
 };
 
 function createMockClient(): MockComponentClient {
@@ -41,31 +51,44 @@ function createMockClient(): MockComponentClient {
     handlers: {},
     on: vi.fn(),
     send: vi.fn().mockResolvedValue(undefined),
+    connect: vi.fn().mockResolvedValue(undefined),
+    open: vi.fn(),
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
+    reconnect: { stop: vi.fn() },
   };
   client.on.mockImplementation((event: keyof MockComponentClient['handlers'], handler: never) => {
     client.handlers[event] = handler;
     return client;
   });
+  client.open.mockImplementation(async () => {
+    client.handlers.online?.();
+  });
   return client;
+}
+
+async function createStartedSession() {
+  const session = createComponentSession(config);
+  await session.start();
+  return session;
 }
 
 describe('XmppComponentSession outbound IQ requests', () => {
   let client: MockComponentClient;
 
   beforeEach(() => {
+    vi.mocked(component).mockReset();
     client = createMockClient();
     vi.mocked(component).mockReturnValue(client as unknown as ReturnType<typeof component>);
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('assigns an id, correlates the result, and leaves unsolicited responses dispatchable', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     const onStanza = vi.fn();
     session.onStanza(onStanza);
     const request = xml('iq', { type: 'get', to: 'upload.test' }, xml('query', { xmlns: 'test:query' }));
@@ -89,7 +112,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
   });
 
   it('rejects an IQ error with the response attached', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     const request = xml('iq', { type: 'get', id: 'iq-error' });
     const responsePromise = session.requestIq(request);
     const response = xml(
@@ -107,7 +130,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
   });
 
   it('registers before send so a synchronous response cannot be lost', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     const request = xml('iq', { type: 'get', id: 'fast-response' });
     const response = xml('iq', { type: 'result', id: 'fast-response' });
     client.send.mockImplementationOnce(async () => {
@@ -119,7 +142,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
 
   it('times out and permits the same id to be reused after cleanup', async () => {
     vi.useFakeTimers();
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     const first = session.requestIq(xml('iq', { type: 'get', id: 'reusable' }), { timeoutMs: 25 });
     const timedOut = expect(first).rejects.toThrow('timed out after 25ms');
 
@@ -133,7 +156,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
   });
 
   it('removes pending state when the initial send fails', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     client.send.mockRejectedValueOnce(new Error('socket closed'));
     await expect(session.requestIq(xml('iq', { type: 'set', id: 'send-failure' }))).rejects.toThrow('socket closed');
 
@@ -144,7 +167,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
   });
 
   it('supports abort signals and does not send an already-aborted request', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     const activeController = new AbortController();
     const active = session.requestIq(xml('iq', { type: 'get', id: 'active-abort' }), {
       signal: activeController.signal,
@@ -162,7 +185,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
   });
 
   it('rejects all pending requests when stopped or disconnected', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     const stopped = session.requestIq(xml('iq', { type: 'get', id: 'stopped' }));
     await session.stop();
     await expect(stopped).rejects.toThrow('component stopped');
@@ -170,7 +193,7 @@ describe('XmppComponentSession outbound IQ requests', () => {
       'component is offline',
     );
 
-    client.handlers.online?.();
+    await session.start();
 
     const offline = session.requestIq(xml('iq', { type: 'get', id: 'offline' }));
     client.handlers.offline?.();
@@ -178,10 +201,11 @@ describe('XmppComponentSession outbound IQ requests', () => {
     await expect(session.requestIq(xml('iq', { type: 'get', id: 'after-offline' }))).rejects.toThrow(
       'component is offline',
     );
+    await session.stop();
   });
 
   it('rejects invalid requests, duplicate ids, and requests beyond the pending cap', async () => {
-    const session = createComponentSession(config);
+    const session = await createStartedSession();
     await expect(session.requestIq(xml('message', { id: 'not-iq' }))).rejects.toThrow('must be an <iq');
     await expect(session.requestIq(xml('iq', { type: 'result', id: 'not-request' }))).rejects.toThrow('must be an <iq');
     await expect(session.requestIq(xml('iq', { type: 'get' }), { timeoutMs: 0 })).rejects.toThrow('positive integer');
@@ -198,5 +222,35 @@ describe('XmppComponentSession outbound IQ requests', () => {
 
     client.handlers.offline?.();
     await Promise.allSettled([pending, ...capped]);
+    await session.stop();
+  });
+
+  it('reports truthful state and reconnects with exponential backoff using a fresh client', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const first = createMockClient();
+    const second = createMockClient();
+    vi.mocked(component)
+      .mockReturnValueOnce(first as unknown as ReturnType<typeof component>)
+      .mockReturnValueOnce(second as unknown as ReturnType<typeof component>);
+    const session = createComponentSession(config);
+    const states: string[] = [];
+    session.onStateChange((state) => states.push(state));
+
+    expect(session.getState()).toBe('offline');
+    await session.start();
+    expect(session.getState()).toBe('online');
+    expect(first.reconnect.stop).toHaveBeenCalledOnce();
+
+    first.handlers.disconnect?.();
+    expect(session.getState()).toBe('offline');
+    await expect(session.send(xml('presence'))).rejects.toThrow('offline');
+
+    await vi.advanceTimersByTimeAsync(config.reconnectInitialMs);
+    expect(second.connect).toHaveBeenCalledOnce();
+    expect(second.open).toHaveBeenCalledOnce();
+    expect(session.getState()).toBe('online');
+    expect(states).toEqual(['connecting', 'online', 'offline', 'connecting', 'online']);
+    await session.stop();
   });
 });

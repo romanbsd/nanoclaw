@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 
-import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
+import { type ChannelAdapter, type ChannelSetup, type InboundMessage, type OutboundMessage } from './adapter.js';
 
 // Mock container runner
 vi.mock('../container-runner.js', () => ({
@@ -204,13 +204,11 @@ describe('channel registry — instance keying', () => {
     expect(reg.getChannelAdapter('slack')).toBe(tester);
 
     // The delivery bridge dispatches by exact key: a default-instance
-    // message (instance === channelType after backfill) throws the typed
-    // missing-adapter error (→ retry path, #2995), and is never delivered
-    // through the sibling's identity.
+    // message (instance === channelType after backfill) is deferred, not
+    // delivered through the sibling's identity.
     const bridge = reg.createChannelDeliveryAdapter();
-    let caught: unknown;
-    try {
-      await bridge.deliver(
+    await expect(
+      bridge.deliver(
         'slack',
         'slack:C1',
         null,
@@ -218,12 +216,12 @@ describe('channel registry — instance keying', () => {
         JSON.stringify({ text: 'to the default bot' }),
         undefined,
         'slack',
-      );
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(reg.MissingChannelAdapterError);
-    expect((caught as InstanceType<typeof reg.MissingChannelAdapterError>).channelType).toBe('slack');
+      ),
+    ).rejects.toMatchObject({
+      name: 'ChannelUnavailableError',
+      channelType: 'slack',
+      instance: 'slack',
+    });
     expect(tester.delivered).toHaveLength(0);
 
     // Sanity: the same bridge DOES deliver when the exact instance is live.

@@ -1,5 +1,5 @@
 import type { AgentTaskRecord, OutboundDeliverRequest } from '@agent-xmpp/protocol';
-import type { Element } from '@xmpp/xml';
+import { xml, type Element } from '@xmpp/xml';
 
 import type { GatewayConfig } from './config.js';
 export { loadConfig } from './config.js';
@@ -18,6 +18,8 @@ import {
 } from './xmpp-component.js';
 import { RECEIPTS_NS } from './xep-plugins/receipts.js';
 import { ReceiptTracker } from './receipt-tracker.js';
+import { PING_NS } from './xep-plugins/ping.js';
+import { XmppKeepalive } from './xmpp-keepalive.js';
 
 /** In-process XMPP channel runtime. All agent IO crosses GatewayRuntimeMailbox. */
 export class EmbeddedXmppGateway {
@@ -25,6 +27,8 @@ export class EmbeddedXmppGateway {
   private router: StanzaRouter | null = null;
   private readonly receipts: ReceiptTracker;
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
+  private keepalive: XmppKeepalive | null = null;
+  private connectionState: ReturnType<XmppComponentSession['getState']> = 'offline';
 
   constructor(
     private readonly config: GatewayConfig,
@@ -46,9 +50,32 @@ export class EmbeddedXmppGateway {
       this.receipts.ack(id),
     );
     session.onStanza((stanza) => void router.handleIncoming(stanza));
-    await session.start();
+    session.onStateChange((state) => {
+      this.connectionState = state;
+    });
     this.session = session;
     this.router = router;
+    await session.start();
+    this.connectionState = session.getState();
+    this.keepalive = new XmppKeepalive(
+      { intervalMs: this.config.pingIntervalMs, failureThreshold: this.config.pingFailureThreshold },
+      {
+        getState: () => session.getState(),
+        getLastActivityAt: () => session.getLastActivityAt(),
+        ping: async () => {
+          await session.requestIq(
+            xml(
+              'iq',
+              { type: 'get', from: this.config.componentJid, to: this.config.serverDomain },
+              xml('ping', { xmlns: PING_NS }),
+            ),
+            { timeoutMs: this.config.pingTimeoutMs },
+          );
+        },
+        forceReconnect: (reason) => session.forceReconnect(reason),
+      },
+    );
+    this.keepalive.start();
     this.sweepTimer = setInterval(() => this.resendUnacked(), this.config.receiptSweepMs);
     this.sweepTimer.unref?.();
   }
@@ -57,6 +84,9 @@ export class EmbeddedXmppGateway {
     const session = this.session;
     this.session = null;
     this.router = null;
+    this.connectionState = 'stopping';
+    this.keepalive?.stop();
+    this.keepalive = null;
     if (this.sweepTimer) {
       clearInterval(this.sweepTimer);
       this.sweepTimer = null;
@@ -64,6 +94,7 @@ export class EmbeddedXmppGateway {
     // Drop pending receipts so a restart's sweep can't resend this session's stanzas.
     this.receipts.clear();
     if (session) await session.stop();
+    this.connectionState = 'offline';
   }
 
   /**
@@ -74,7 +105,7 @@ export class EmbeddedXmppGateway {
    */
   private resendUnacked(): void {
     const session = this.session;
-    if (!session) return;
+    if (!session || !this.isConnected()) return;
     const { resend, gaveUp } = this.receipts.due(Date.now());
     for (const stanza of resend) {
       void session.send(stanza).catch((err) => {
@@ -90,7 +121,7 @@ export class EmbeddedXmppGateway {
   }
 
   isConnected(): boolean {
-    return this.session !== null;
+    return this.session !== null && this.connectionState === 'online';
   }
 
   /** Send an IQ get/set and await its correlated result or error response. */

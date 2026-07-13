@@ -38,6 +38,7 @@ import { getDeliveredIds } from './db/session-db.js';
 import { resolveSession, resolveTaskSession, outboundDbPath, openInboundDb } from './session-manager.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
 import { createChannelDeliveryAdapter } from './channels/channel-registry.js';
+import { ChannelUnavailableError } from './channels/errors.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -157,6 +158,44 @@ describe('deliverSessionMessages — concurrent invocations', () => {
 });
 
 describe('deliverSessionMessages — retry and permanent failure', () => {
+  it('does not consume the send-failure retry budget while the adapter is offline', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    insertOutbound('ag-1', session.id, 'out-offline');
+
+    let callCount = 0;
+    setDeliveryAdapter({
+      async deliver() {
+        callCount++;
+        throw new ChannelUnavailableError('telegram');
+      },
+    });
+
+    // More polls than MAX_DELIVERY_ATTEMPTS must not mark the row failed.
+    for (let poll = 0; poll < 4; poll++) {
+      await deliverSessionMessages(session);
+    }
+    expect(callCount).toBe(4);
+
+    const pendingDb = openInboundDb('ag-1', session.id);
+    expect(getDeliveredIds(pendingDb).has('out-offline')).toBe(false);
+    pendingDb.close();
+
+    // Once the adapter recovers, the same pending row is delivered normally.
+    setDeliveryAdapter({
+      async deliver() {
+        callCount++;
+        return 'plat-after-reconnect';
+      },
+    });
+    await deliverSessionMessages(session);
+    expect(callCount).toBe(5);
+
+    const deliveredDb = openInboundDb('ag-1', session.id);
+    expect(getDeliveredIds(deliveredDb).has('out-offline')).toBe(true);
+    deliveredDb.close();
+  });
+
   it('retries on adapter failure and marks failed after MAX_DELIVERY_ATTEMPTS (3)', async () => {
     seedAgentAndChannel();
     const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');

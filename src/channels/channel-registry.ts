@@ -4,7 +4,14 @@
  * Channels self-register on import. The host calls initChannelAdapters() at startup
  * to instantiate and set up all registered adapters.
  */
-import type { ChannelAdapter, ChannelDefaults, ChannelRegistration, ChannelSetup, OutboundFile } from './adapter.js';
+import {
+  type ChannelAdapter,
+  type ChannelDefaults,
+  type ChannelRegistration,
+  type ChannelSetup,
+  type OutboundFile,
+} from './adapter.js';
+import { ChannelUnavailableError } from './errors.js';
 import type { ChannelDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
 
@@ -89,9 +96,9 @@ export class MissingChannelAdapterError extends Error {
  * `instance ?? channelType`. For default-instance messaging_groups rows the
  * stored instance IS the channelType, which matches default-registered
  * adapters, so single-instance behavior is unchanged. A named instance whose
- * adapter is offline gets the normal offline-adapter handling
- * (MissingChannelAdapterError → the delivery retry path) — never a
- * cross-identity send through a sibling bot of the same platform.
+ * adapter is offline leaves the outbound row pending without consuming its
+ * send-failure retry budget — never a cross-identity send through a sibling
+ * bot of the same platform.
  */
 export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
   return {
@@ -106,9 +113,10 @@ export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
       senderIdentity?: string,
       agentGroupId?: string,
     ): Promise<string | undefined> {
-      const adapter = getChannelAdapterExact(instance ?? channelType);
-      if (!adapter) {
-        throw new MissingChannelAdapterError(channelType, instance);
+      const adapterKey = instance ?? channelType;
+      const adapter = getChannelAdapterExact(adapterKey);
+      if (!adapter || !adapter.isConnected()) {
+        throw new ChannelUnavailableError(channelType, adapterKey);
       }
       const resolvedIdentity =
         senderIdentity ?? (agentGroupId ? adapter.resolveSenderIdentity?.(agentGroupId) : undefined);

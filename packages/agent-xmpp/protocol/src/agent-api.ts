@@ -1,4 +1,4 @@
-export const AGENT_API_SPEC_VERSION = 'urn:businessos:agent-api:1' as const;
+import { AGENT_API_SPEC_VERSION } from './namespaces.js';
 
 export type JsonSchema = Record<string, unknown>;
 

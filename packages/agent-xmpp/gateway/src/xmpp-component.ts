@@ -13,8 +13,14 @@ export interface XmppComponentSession {
   requestIq: (stanza: Element, options?: IqRequestOptions) => Promise<Element>;
   start: () => Promise<void>;
   stop: () => Promise<void>;
+  forceReconnect: (reason: string) => Promise<void>;
+  getState: () => XmppConnectionState;
+  getLastActivityAt: () => number;
+  onStateChange: (handler: (state: XmppConnectionState) => void) => void;
   onStanza: (handler: (stanza: Element) => void) => void;
 }
+
+export type XmppConnectionState = 'offline' | 'connecting' | 'online' | 'stopping';
 
 export interface IqRequestOptions {
   timeoutMs?: number;
@@ -90,16 +96,32 @@ export function dispositionForStanza(stanza: Element, onIqGet?: IqGetHandler): I
   return { kind: 'dispatch' };
 }
 
-export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHandler): XmppComponentSession {
-  const xmpp = component({
-    service: config.componentService,
-    domain: config.componentJid,
-    password: config.componentSecret,
-  });
+export function reconnectDelayMs(attempt: number, initialMs: number, maxMs: number, random = Math.random): number {
+  const exponential = Math.min(maxMs, initialMs * 2 ** Math.min(Math.max(attempt - 1, 0), 30));
+  return Math.max(1, Math.round(exponential * (0.8 + random() * 0.4)));
+}
 
+export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHandler): XmppComponentSession {
   const stanzaHandlers: Array<(stanza: Element) => void> = [];
+  const stateHandlers: Array<(state: XmppConnectionState) => void> = [];
   const pendingIqRequests = new Map<string, PendingIqRequest>();
-  let acceptsIqRequests = true;
+  let activeClient: ReturnType<typeof component> | null = null;
+  let state: XmppConnectionState = 'offline';
+  let stopped = true;
+  let reconnectAttempt = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastActivityAt = Date.now();
+  let onlineAttempt: {
+    client: ReturnType<typeof component>;
+    resolve: () => void;
+    reject: (error: Error) => void;
+  } | null = null;
+
+  const transition = (next: XmppConnectionState): void => {
+    if (state === next) return;
+    state = next;
+    for (const handler of stateHandlers) handler(next);
+  };
 
   const settleIqRequest = (id: string, responseOrError: Element | Error): boolean => {
     const pending = pendingIqRequests.get(id);
@@ -121,39 +143,146 @@ export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHan
     }
   };
 
-  xmpp.on('stanza', (stanza: Element) => {
-    const disposition = dispositionForStanza(stanza, onIqGet);
-    if (disposition.kind !== 'dispatch') {
-      const reply = disposition.kind === 'respond' ? disposition.stanza : buildIqError(stanza);
-      xmpp.send(reply).catch((err) => {
-        console.error(`[xmpp-gateway] IQ ${disposition.kind} send failed:`, err);
+  const rejectOnlineAttempt = (client: ReturnType<typeof component>, reason: Error): void => {
+    if (onlineAttempt?.client !== client) return;
+    const attempt = onlineAttempt;
+    onlineAttempt = null;
+    attempt.reject(reason);
+  };
+
+  const clearReconnectTimer = (): void => {
+    if (!reconnectTimer) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  };
+
+  const scheduleReconnect = (): void => {
+    if (stopped || reconnectTimer) return;
+    reconnectAttempt += 1;
+    const delay = reconnectDelayMs(reconnectAttempt, config.reconnectInitialMs, config.reconnectMaxMs);
+    console.error(`[xmpp-gateway] reconnect attempt ${reconnectAttempt} scheduled in ${delay}ms`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      void connectClient();
+    }, delay);
+    reconnectTimer.unref?.();
+  };
+
+  const handleConnectionLoss = (client: ReturnType<typeof component>, reason: string): void => {
+    if (activeClient !== client || stopped || state === 'stopping') return;
+    activeClient = null;
+    transition('offline');
+    rejectOnlineAttempt(client, new Error(reason));
+    rejectPendingIqRequests(reason);
+    scheduleReconnect();
+  };
+
+  const createClient = (): ReturnType<typeof component> => {
+    const client = component({
+      service: config.componentService,
+      domain: config.componentJid,
+      password: config.componentSecret,
+    });
+    // The package helper makes only one fixed-delay attempt. The gateway owns a
+    // capped, jittered supervisor and creates a clean client for every attempt.
+    client.reconnect.stop();
+
+    client.on('stanza', (stanza: Element) => {
+      if (activeClient !== client) return;
+      lastActivityAt = Date.now();
+      const disposition = dispositionForStanza(stanza, onIqGet);
+      if (disposition.kind !== 'dispatch') {
+        const reply = disposition.kind === 'respond' ? disposition.stanza : buildIqError(stanza);
+        client
+          .send(reply)
+          .then(() => {
+            lastActivityAt = Date.now();
+          })
+          .catch((err) => {
+            console.error(`[xmpp-gateway] IQ ${disposition.kind} send failed:`, err);
+          });
+        return;
+      }
+
+      const type = String(stanza.attrs.type ?? '');
+      const id = String(stanza.attrs.id ?? '');
+      if (stanza.name === 'iq' && id && (type === 'result' || type === 'error') && settleIqRequest(id, stanza)) {
+        return;
+      }
+      for (const handler of stanzaHandlers) handler(stanza);
+    });
+
+    client.on('error', (err: Error) => {
+      if (activeClient === client) {
+        console.error('[xmpp-gateway] component error:', err.message);
+        rejectOnlineAttempt(client, err);
+      }
+    });
+    client.on('online', () => {
+      if (activeClient !== client || stopped) return;
+      reconnectAttempt = 0;
+      clearReconnectTimer();
+      lastActivityAt = Date.now();
+      transition('online');
+      if (onlineAttempt?.client === client) {
+        const attempt = onlineAttempt;
+        onlineAttempt = null;
+        attempt.resolve();
+      }
+    });
+    client.on('disconnect', () => handleConnectionLoss(client, 'component disconnected'));
+    client.on('offline', () => handleConnectionLoss(client, 'component went offline'));
+    return client;
+  };
+
+  async function connectClient(): Promise<void> {
+    if (stopped || state === 'connecting' || state === 'online') return;
+    transition('connecting');
+    const client = createClient();
+    activeClient = client;
+    try {
+      // Avoid Component.start(): @xmpp/connection creates an internal
+      // `online` promise before `open()`, and both promises reject on a
+      // connection error. Only one is awaited upstream, producing an
+      // unhandled rejection during ordinary reconnect failures.
+      await client.connect(config.componentService);
+      const onlinePromise = new Promise<void>((resolve, reject) => {
+        onlineAttempt = { client, resolve, reject };
       });
-      return;
+      try {
+        await client.open({ domain: config.componentJid });
+        await onlinePromise;
+      } catch (error: unknown) {
+        rejectOnlineAttempt(client, error instanceof Error ? error : new Error(String(error)));
+        await onlinePromise.catch(() => undefined);
+        throw error;
+      }
+      if (activeClient === client && !stopped) {
+        reconnectAttempt = 0;
+        lastActivityAt = Date.now();
+        transition('online');
+        console.error(`[xmpp-gateway] component online: ${config.componentJid}`);
+      }
+    } catch (error: unknown) {
+      if (activeClient === client) activeClient = null;
+      client.reconnect.stop();
+      transition('offline');
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[xmpp-gateway] component connection failed: ${message}`);
+      scheduleReconnect();
+      await client.stop().catch(() => undefined);
     }
+  }
 
-    const type = String(stanza.attrs.type ?? '');
-    const id = String(stanza.attrs.id ?? '');
-    if (stanza.name === 'iq' && id && (type === 'result' || type === 'error') && settleIqRequest(id, stanza)) {
-      return;
-    }
-    for (const h of stanzaHandlers) h(stanza);
-  });
-
-  xmpp.on('error', (err: Error) => {
-    console.error('[xmpp-gateway] component error:', err.message);
-  });
-
-  xmpp.on('offline', () => {
-    acceptsIqRequests = false;
-    rejectPendingIqRequests('component went offline');
-  });
-
-  xmpp.on('online', () => {
-    acceptsIqRequests = true;
-  });
+  const send = async (stanza: Element): Promise<void> => {
+    const client = activeClient;
+    if (state !== 'online' || !client) throw new Error('XMPP component is offline');
+    await client.send(stanza);
+    lastActivityAt = Date.now();
+  };
 
   const requestIq = (stanza: Element, options: IqRequestOptions = {}): Promise<Element> => {
-    if (!acceptsIqRequests) return Promise.reject(new Error('Cannot send IQ request while component is offline'));
+    if (state !== 'online') return Promise.reject(new Error('Cannot send IQ request while component is offline'));
 
     const type = String(stanza.attrs.type ?? '');
     if (stanza.name !== 'iq' || (type !== 'get' && type !== 'set')) {
@@ -190,7 +319,7 @@ export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHan
       pendingIqRequests.set(id, pending);
 
       try {
-        xmpp.send(stanza).catch((error: unknown) => {
+        send(stanza).catch((error: unknown) => {
           const sendError = error instanceof Error ? error : new Error(String(error));
           settleIqRequest(id, sendError);
         });
@@ -202,18 +331,42 @@ export function createComponentSession(config: GatewayConfig, onIqGet?: IqGetHan
   };
 
   return {
-    send: (stanza) => xmpp.send(stanza),
+    send,
     requestIq,
     start: async () => {
-      await xmpp.start();
-      acceptsIqRequests = true;
-      console.error(`[xmpp-gateway] component online: ${config.componentJid}`);
+      if (!stopped) return;
+      stopped = false;
+      reconnectAttempt = 0;
+      clearReconnectTimer();
+      await connectClient();
     },
     stop: async () => {
-      acceptsIqRequests = false;
+      if (stopped && state === 'offline') return;
+      stopped = true;
+      clearReconnectTimer();
+      transition('stopping');
       rejectPendingIqRequests('component stopped');
-      await xmpp.stop();
+      const client = activeClient;
+      activeClient = null;
+      if (client) rejectOnlineAttempt(client, new Error('component stopped'));
+      client?.reconnect.stop();
+      if (client) await client.stop().catch(() => undefined);
+      transition('offline');
     },
+    forceReconnect: async (reason) => {
+      if (stopped || state === 'stopping') return;
+      const client = activeClient;
+      activeClient = null;
+      transition('offline');
+      if (client) rejectOnlineAttempt(client, new Error(reason));
+      rejectPendingIqRequests(reason);
+      client?.reconnect.stop();
+      if (client) await client.stop().catch(() => undefined);
+      scheduleReconnect();
+    },
+    getState: () => state,
+    getLastActivityAt: () => lastActivityAt,
+    onStateChange: (handler) => stateHandlers.push(handler),
     onStanza: (handler) => {
       stanzaHandlers.push(handler);
     },

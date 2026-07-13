@@ -13,11 +13,14 @@ import { VCARD_TEMP_NS } from './xep-plugins/vcard.js';
 export const DISCO_INFO_NS = 'http://jabber.org/protocol/disco#info';
 export const DISCO_ITEMS_NS = 'http://jabber.org/protocol/disco#items';
 export const DATA_FORMS_NS = 'jabber:x:data';
-export const AGENT_DIRECTORY_NS = 'urn:businessos:agent-directory:1';
-export const AGENT_API_NS = 'urn:businessos:agent-api:1';
-export const AGENT_OPERATION_NS = 'urn:businessos:agent-operation:1';
-export const MCP_ENDPOINT_NS = 'urn:businessos:mcp-endpoint:1';
-export const AGENT_TASK_NS = 'urn:businessos:agent-task:1';
+import {
+  AGENT_DIRECTORY_NS,
+  AGENT_API_NS,
+  AGENT_OPERATION_NS,
+  MCP_ENDPOINT_NS,
+  AGENT_TASK_NS,
+} from '@agent-xmpp/protocol';
+export { AGENT_DIRECTORY_NS, AGENT_API_NS, AGENT_OPERATION_NS, MCP_ENDPOINT_NS, AGENT_TASK_NS };
 
 function resultIq(request: Element, from: string, child: Element): Element {
   return xml('iq', { type: 'result', id: request.attrs.id, from, to: request.attrs.from }, child);

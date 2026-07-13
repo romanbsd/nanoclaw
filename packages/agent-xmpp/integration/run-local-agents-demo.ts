@@ -7,7 +7,6 @@ import path from 'node:path';
 
 import { getDefaultContainerImage } from '../../../src/install-slug.js';
 import { startOpenfireOnly, stopOpenfireOnly, type E2eStackConfig, REPO_ROOT } from './e2e-stack.js';
-import { resolveNode22Bin, resolveNode22Version } from './resolve-node22.js';
 import { XmppSession } from './xmpp-session.js';
 
 const TSX = path.join(REPO_ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
@@ -364,13 +363,12 @@ async function cleanup(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (Number(process.versions.node.split('.')[0]) !== 22) throw new Error('Node.js 22 is required');
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.once(signal, () => {
       cleanup().finally(() => process.exit(signal === 'SIGINT' ? 130 : 143));
     });
   }
-  log(`using Node ${resolveNode22Version()}`);
+  log(`using Node ${process.version}`);
   if (process.env.KEEP_DEMO === '1') process.env.KEEP_E2E = '1';
 
   if (process.env.KEEP_DEMO !== '1') {
@@ -407,11 +405,11 @@ async function main(): Promise<void> {
     LOG_LEVEL: process.env.LOG_LEVEL || 'info',
   };
 
-  hostProcess = spawnLogged('host', resolveNode22Bin(), [TSX, 'src/index.ts'], sharedEnv);
+  hostProcess = spawnLogged('host', process.execPath, [TSX, 'src/index.ts'], sharedEnv);
   await waitForPath(path.join(DATA_DIR, 'ncl.sock'));
   orchestratorProcess = spawnLogged(
     'orchestrator',
-    resolveNode22Bin(),
+    process.execPath,
     [TSX, 'packages/orchestrator/src/server.ts'],
     sharedEnv,
   );

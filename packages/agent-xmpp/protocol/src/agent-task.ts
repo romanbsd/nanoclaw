@@ -1,5 +1,3 @@
-export const AGENT_TASK_NS = 'urn:businessos:agent-task:1' as const;
-
 export const taskStates = [
   'created',
   'validating',

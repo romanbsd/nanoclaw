@@ -4,6 +4,8 @@ export interface GatewayConfig {
   componentJid: string;
   /** Delegated domain for virtual agent JIDs, e.g. agents.example */
   agentDomain: string;
+  /** XMPP server domain used as the XEP-0199 keepalive target. */
+  serverDomain: string;
   /** xmpp://host:5275 or xmpps://host:5347 */
   componentService: string;
   componentSecret: string;
@@ -20,6 +22,16 @@ export interface GatewayConfig {
   receiptMaxResends: number;
   /** How often the resend sweep runs (ms). */
   receiptSweepMs: number;
+  /** Initial reconnect delay; subsequent failures back off exponentially. */
+  reconnectInitialMs: number;
+  /** Maximum reconnect delay. */
+  reconnectMaxMs: number;
+  /** Send XEP-0199 after this much connection inactivity. */
+  pingIntervalMs: number;
+  /** Time allowed for an XEP-0199 response. */
+  pingTimeoutMs: number;
+  /** Consecutive ping failures before forcing a reconnect. */
+  pingFailureThreshold: number;
 }
 
 /** Non-negative integer (0 is meaningful, e.g. observe-only resends). */
@@ -48,16 +60,25 @@ function env(name: string, fallback?: string): string {
 export function loadConfig(): GatewayConfig {
   const componentJid = env('XMPP_COMPONENT_JID');
   const agentDomain = process.env.XMPP_AGENT_DOMAIN || componentJid.split('.').slice(1).join('.') || componentJid;
+  const inferredServerDomain = componentJid.split('.').slice(1).join('.') || componentJid;
+  const reconnectInitialMs = envPosInt('XMPP_RECONNECT_INITIAL_MS', 1_000);
+  const reconnectMaxMs = Math.max(reconnectInitialMs, envPosInt('XMPP_RECONNECT_MAX_MS', 60_000));
 
   return {
     gatewayId: process.env.XMPP_GATEWAY_ID || 'gw-1',
     componentJid,
     agentDomain,
+    serverDomain: process.env.XMPP_SERVER_DOMAIN || inferredServerDomain,
     componentService: env('XMPP_COMPONENT_SERVICE', 'xmpp://127.0.0.1:5275'),
     componentSecret: env('XMPP_COMPONENT_SECRET'),
     defaultAgentJid: process.env.XMPP_DEFAULT_AGENT_JID || `assistant@${agentDomain}`,
     receiptTimeoutMs: envPosInt('XMPP_RECEIPT_TIMEOUT_MS', 30_000),
     receiptMaxResends: envNonNegInt('XMPP_RECEIPT_MAX_RESENDS', 0),
     receiptSweepMs: envPosInt('XMPP_RECEIPT_SWEEP_MS', 10_000),
+    reconnectInitialMs,
+    reconnectMaxMs,
+    pingIntervalMs: envPosInt('XMPP_PING_INTERVAL_MS', 60_000),
+    pingTimeoutMs: envPosInt('XMPP_PING_TIMEOUT_MS', 10_000),
+    pingFailureThreshold: envPosInt('XMPP_PING_FAILURE_THRESHOLD', 2),
   };
 }

@@ -283,7 +283,7 @@ The orchestrator is a Fastify HTTP service in `packages/orchestrator`. It initia
 
 If `ORCHESTRATOR_API_SECRET` is set, all `/v1` requests require `Authorization: Bearer <secret>`. Without a secret, the server refuses to bind a non-loopback host. The default bind is `127.0.0.1:19300`.
 
-Start it from the repository root with Node 22:
+Start it from the repository root with a supported Node release (Node 26 is verified):
 
 ```bash
 pnpm --filter orchestrator start
@@ -689,6 +689,12 @@ XMPP_AGENT_DOMAIN=agents.example
 XMPP_COMPONENT_SERVICE=xmpp://127.0.0.1:5275
 XMPP_COMPONENT_SECRET=component-secret
 XMPP_DEFAULT_AGENT_JID=assistant@agents.example
+XMPP_SERVER_DOMAIN=example
+XMPP_RECONNECT_INITIAL_MS=1000
+XMPP_RECONNECT_MAX_MS=60000
+XMPP_PING_INTERVAL_MS=60000
+XMPP_PING_TIMEOUT_MS=10000
+XMPP_PING_FAILURE_THRESHOLD=2
 ```
 
 Configure provisioning as needed:
@@ -702,7 +708,7 @@ ORCHESTRATOR_PORT=19300
 ORCHESTRATOR_API_SECRET=<optional-on-loopback-required-off-loopback>
 ```
 
-The host must run on Node 22 for this project. Build and test commands are:
+The host supports current Node releases; Node 26 is covered by the native SQLite dependency and the full test suite. Build and test commands are:
 
 ```bash
 pnpm run build
@@ -712,7 +718,7 @@ pnpm run test:xmpp-e2e
 
 The live integration test starts Openfire, connects the real embedded component, and exercises the production IQ handler and durable manifest store.
 
-For an operator-facing local demonstration, `pnpm run demo:xmpp-agents` starts Openfire, the embedded gateway, orchestrator, Rapid-MLX/OpenCode, and two independently provisioned agents, Jane and Mike. The script requires and selects Node 22. Its smoke client exits before the “ready” banner; full-JID reply routing additionally ensures that a simultaneously connected operator resource cannot race with a test resource using the same account.
+For an operator-facing local demonstration, `pnpm run demo:xmpp-agents` starts Openfire, the embedded gateway, orchestrator, Rapid-MLX/OpenCode, and two independently provisioned agents, Jane and Mike. It uses the Node executable that launched the demo, including Node 26. Its smoke client exits before the “ready” banner; full-JID reply routing additionally ensures that a simultaneously connected operator resource cannot race with a test resource using the same account.
 
 The demo disables Rapid-MLX prefix caching. Jane and Mike have different large system prompts, and retaining the first agent's KV cache can leave insufficient Metal headroom to admit the second request even though the 12B model itself fits in unified memory.
 

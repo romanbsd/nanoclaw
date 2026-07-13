@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
 
 import {
+  AGENT_API_NS,
+  AGENT_TASK_NS,
+  MCP_ENDPOINT_NS,
   terminalTaskStates,
   type AgentApiManifest,
   type AgentTaskEvent,
@@ -224,6 +227,8 @@ export class XmppAgentGatewayStore {
   }
 
   appendEvent(event: AgentTaskEvent): void {
+    // ponytail: MAX(sequence)+1 then INSERT is not atomic — safe only because the
+    // host is the single writer of this DB. Add a per-task lock if that ever changes.
     const next = (
       getDb()
         .prepare('SELECT COALESCE(MAX(sequence), 0) + 1 AS n FROM xmpp_agent_task_events WHERE task_id = ?')
@@ -295,9 +300,9 @@ export function endpointDescriptor(agent: RegisteredAgent): VirtualMcpEndpoint {
     capabilities: agent.manifest.capabilities,
     xmpp: {
       jid,
-      endpointNode: 'urn:businessos:mcp-endpoint:1',
-      toolsNode: 'urn:businessos:agent-api:1',
-      features: ['urn:businessos:agent-task:1'],
+      endpointNode: MCP_ENDPOINT_NS,
+      toolsNode: AGENT_API_NS,
+      features: [AGENT_TASK_NS],
     },
     authorization: {
       visible: true,

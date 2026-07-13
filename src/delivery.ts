@@ -34,6 +34,7 @@ import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
 import { setTypingAdapter, stopTypingRefresh } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
+import { ChannelUnavailableError } from './channels/errors.js';
 import type { PendingApproval, Session } from './types.js';
 
 const ACTIVE_POLL_MS = 1000;
@@ -228,6 +229,12 @@ async function drainSession(session: Session): Promise<void> {
           stopTypingRefresh(session.id);
         }
       } catch (err) {
+        // An offline adapter means no send was attempted. Keep the outbound
+        // row pending and preserve the retry budget until the channel's
+        // connection supervisor reports it online again.
+        if (err instanceof ChannelUnavailableError) {
+          continue;
+        }
         const attempts = (deliveryAttempts.get(msg.id) ?? 0) + 1;
         deliveryAttempts.set(msg.id, attempts);
         if (attempts >= MAX_DELIVERY_ATTEMPTS) {
@@ -270,8 +277,7 @@ async function deliverMessage(
   inDb: Database.Database,
 ): Promise<string | undefined> {
   if (!deliveryAdapter) {
-    log.warn('No delivery adapter configured, dropping message', { id: msg.id });
-    return;
+    throw new ChannelUnavailableError(msg.channel_type ?? 'unknown');
   }
 
   const content = JSON.parse(msg.content);

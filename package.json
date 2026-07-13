@@ -35,7 +35,7 @@
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
     "@onecli-sh/sdk": "2.2.1",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "12.11.1",
     "chat": "4.29.0",
     "cron-parser": "5.5.0",
     "kleur": "^4.1.5",
