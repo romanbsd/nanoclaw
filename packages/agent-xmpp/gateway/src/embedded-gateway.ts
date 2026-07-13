@@ -10,7 +10,12 @@ import type { GatewayRuntimeMailbox } from './runtime-mailbox.js';
 import { applyStoreHints, buildOutboundStanza } from './xep-plugins/message.js';
 import { isMucJid } from './xep-plugins/muc.js';
 import { buildTaskEvent, buildTaskInvocation, type TaskWireEvent } from './task-stanza-codec.js';
-import { createComponentSession, type IqGetHandler, type XmppComponentSession } from './xmpp-component.js';
+import {
+  createComponentSession,
+  type IqGetHandler,
+  type IqRequestOptions,
+  type XmppComponentSession,
+} from './xmpp-component.js';
 import { RECEIPTS_NS } from './xep-plugins/receipts.js';
 import { ReceiptTracker } from './receipt-tracker.js';
 
@@ -88,6 +93,11 @@ export class EmbeddedXmppGateway {
     return this.session !== null;
   }
 
+  /** Send an IQ get/set and await its correlated result or error response. */
+  requestIq(stanza: Element, options?: IqRequestOptions): Promise<Element> {
+    return this.requiredSession().requestIq(stanza, options);
+  }
+
   /**
    * The single outbound send path. Any stanza carrying an XEP-0184 <request/> is
    * registered for receipt tracking *before* the send resolves — otherwise a fast peer's
@@ -146,6 +156,8 @@ export class EmbeddedXmppGateway {
 
 export type { GatewayRuntimeMailbox } from './runtime-mailbox.js';
 export type { Element } from '@xmpp/xml';
+export { IqResponseError } from './xmpp-component.js';
+export type { IqRequestOptions } from './xmpp-component.js';
 export * from './agent-api-disco.js';
 export * from './task-stanza-codec.js';
 export * from './xep-plugins/ping.js';

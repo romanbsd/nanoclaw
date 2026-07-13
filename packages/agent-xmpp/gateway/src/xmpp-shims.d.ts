@@ -27,6 +27,8 @@ declare module '@xmpp/component' {
   interface ComponentClient {
     on(event: 'stanza', handler: (stanza: Element) => void): this;
     on(event: 'error', handler: (error: Error) => void): this;
+    on(event: 'offline', handler: () => void): this;
+    on(event: 'online', handler: () => void): this;
     send(stanza: Element): Promise<void>;
     start(): Promise<void>;
     stop(): Promise<void>;

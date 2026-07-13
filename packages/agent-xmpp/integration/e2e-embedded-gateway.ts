@@ -10,6 +10,7 @@ import {
   DISCO_ITEMS_NS,
   MCP_ENDPOINT_NS,
   EmbeddedXmppGateway,
+  IqResponseError,
   PING_NS,
   VCARD_TEMP_NS,
   buildTaskInvocation,
@@ -28,6 +29,7 @@ import { runOpenfireBootstrap, startOpenfireOnly, stopOpenfireOnly } from './e2e
 import { XmppSession } from './xmpp-session.js';
 
 const RECEIPTS_NS = 'urn:xmpp:receipts';
+const STANZA_ERROR_NS = 'urn:ietf:params:xml:ns:xmpp-stanzas';
 
 class MailboxSpy implements GatewayRuntimeMailbox {
   readonly inbound: BridgeInboundPayload[] = [];
@@ -176,6 +178,31 @@ async function main(): Promise<void> {
       autoReceipts: true,
     });
     await peer.start();
+
+    const peerJid = `peer-agent@${config.xmppDomain}`;
+    const outboundPing = xml(
+      'iq',
+      { type: 'get', from: agents[0].manifest.agent.jid, to: peerJid },
+      xml('ping', { xmlns: PING_NS }),
+    );
+    const outboundPingResult = await gateway.requestIq(outboundPing, { timeoutMs: 5_000 });
+    assert.equal(outboundPingResult.attrs.type, 'result');
+    assert.equal(outboundPingResult.attrs.id, outboundPing.attrs.id);
+    assert.equal(String(outboundPingResult.attrs.from).split('/')[0], peerJid);
+    assert.equal(mailbox.inbound.length, 0, 'correlated outbound IQ results must not enter the agent mailbox');
+
+    const unsupportedIq = xml(
+      'iq',
+      { type: 'get', from: agents[0].manifest.agent.jid, to: peerJid },
+      xml('query', { xmlns: 'urn:agent-xmpp:test:unsupported' }),
+    );
+    await assert.rejects(gateway.requestIq(unsupportedIq, { timeoutMs: 5_000 }), (error: unknown) => {
+      assert.ok(error instanceof IqResponseError);
+      assert.equal(error.response.attrs.id, unsupportedIq.attrs.id);
+      assert.ok(error.response.getChild('error')?.getChild('service-unavailable', STANZA_ERROR_NS));
+      return true;
+    });
+    assert.equal(mailbox.inbound.length, 0, 'correlated outbound IQ errors must not enter the agent mailbox');
 
     for (const to of [componentJid, agents[0].manifest.agent.jid, agents[1].manifest.agent.jid]) {
       const id = `ping-${to}-${Date.now()}`;
@@ -416,7 +443,7 @@ async function main(): Promise<void> {
 
     assert.equal(mailbox.inbound.length, 4, 'IQ ping and discovery must not wake agents');
     console.log(
-      '[e2e] embedded gateway: ping, presence, receipts/restart, vCard, human/agent, agent/agent, discovery, and remote task lifecycle passed',
+      '[e2e] embedded gateway: outbound IQ, ping, presence, receipts/restart, vCard, human/agent, agent/agent, discovery, and remote task lifecycle passed',
     );
   } finally {
     await user.stop().catch(() => undefined);
