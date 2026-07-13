@@ -44,6 +44,10 @@ export class XmppSession {
     );
   }
 
+  async subscribe(to: string): Promise<void> {
+    await this.xmpp.send(xml('presence', { type: 'subscribe', to }));
+  }
+
   async send(stanza: Element): Promise<void> {
     await this.xmpp.send(stanza);
   }

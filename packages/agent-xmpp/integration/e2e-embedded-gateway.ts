@@ -154,14 +154,28 @@ async function main(): Promise<void> {
       assert.equal((await response).attrs.from, to);
     }
 
+    const subscribed = user.waitForStanza(
+      (stanza) => stanza.is('presence') && stanza.attrs.from === agents[0].manifest.agent.jid && stanza.attrs.type === 'subscribed',
+    );
     const presence = user.waitForStanza(
       (stanza) => stanza.is('presence') && stanza.attrs.from === agents[0].manifest.agent.jid && !stanza.attrs.type,
     );
-    await user.send(xml('presence', {
-      type: 'probe',
-      to: agents[0].manifest.agent.jid,
-    }));
+    await user.subscribe(agents[0].manifest.agent.jid);
+    await subscribed;
     assert.equal((await presence).getChildText('show'), 'chat');
+
+    const reconnectingUser = new XmppSession({
+      service: config.xmppService,
+      domain: config.xmppDomain,
+      username: 'john',
+      password: 'secret',
+    });
+    const presenceAfterReconnect = reconnectingUser.waitForStanza(
+      (stanza) => stanza.is('presence') && stanza.attrs.from === agents[0].manifest.agent.jid && !stanza.attrs.type,
+    );
+    await reconnectingUser.start();
+    assert.equal((await presenceAfterReconnect).getChildText('show'), 'chat');
+    await reconnectingUser.stop();
 
     const vcardId = `vcard-${Date.now()}`;
     const vcard = user.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === vcardId);

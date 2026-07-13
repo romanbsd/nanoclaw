@@ -161,6 +161,33 @@ async function output(command: string, args: string[]): Promise<string> {
   });
 }
 
+async function stopDemoContainers(): Promise<void> {
+  const containerIds = await output('docker', [
+    'ps',
+    '-q',
+    '--filter',
+    'label=nanoclaw-install=xmpp-demo',
+  ]).catch(() => '');
+  if (containerIds) await run('docker', ['stop', ...containerIds.split(/\s+/)]).catch(() => undefined);
+}
+
+async function makeDemoRootRemovable(): Promise<void> {
+  if (!fs.existsSync(DEMO_ROOT)) return;
+  const image = process.env.CONTAINER_IMAGE || getDefaultContainerImage(REPO_ROOT);
+  await run('docker', [
+    'run',
+    '--rm',
+    '--entrypoint',
+    'chown',
+    '-v',
+    `${DEMO_ROOT}:/demo`,
+    image,
+    '-R',
+    `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
+    '/demo',
+  ]).catch(() => undefined);
+}
+
 async function ensureOneCli(): Promise<string> {
   const url = process.env.ONECLI_URL || 'http://127.0.0.1:10254';
   if (await urlIsReady(`${url}/v1/health`)) return url;
@@ -280,6 +307,22 @@ async function waitForAgentReply(client: XmppSession, agent: ProvisionedAgent): 
   throw new Error(`Timed out waiting for a successful reply from ${agent.name}`);
 }
 
+async function subscribeToAgent(client: XmppSession, agent: ProvisionedAgent): Promise<void> {
+  const accepted = client.waitForStanza((stanza) =>
+    stanza.is('presence') &&
+    stanza.attrs.type === 'subscribed' &&
+    String(stanza.attrs.from || '').split('/')[0] === agent.jid,
+  );
+  const available = client.waitForStanza((stanza) =>
+    stanza.is('presence') &&
+    !stanza.attrs.type &&
+    String(stanza.attrs.from || '').split('/')[0] === agent.jid,
+  );
+  await client.subscribe(agent.jid);
+  await Promise.all([accepted, available]);
+  log(`${agent.name} roster subscription accepted and presence is available`);
+}
+
 async function deleteProvisionedAgents(): Promise<void> {
   for (const agent of provisioned.reverse()) {
     await fetch(`${ORCHESTRATOR_URL}/v1/agents/${agent.orchestratorId}`, {
@@ -305,25 +348,8 @@ function printConnectionInfo(config: E2eStackConfig): void {
 async function cleanup(): Promise<void> {
   cleanupPromise ??= (async () => {
     if (process.env.KEEP_DEMO === '1') return;
-    const containerIds = await output('docker', ['ps', '-q', '--filter', 'label=nanoclaw-install=xmpp-demo']).catch(
-      () => '',
-    );
-    if (containerIds) await run('docker', ['stop', ...containerIds.split(/\s+/)]).catch(() => undefined);
-    if (fs.existsSync(DEMO_ROOT)) {
-      const image = process.env.CONTAINER_IMAGE || getDefaultContainerImage(REPO_ROOT);
-      await run('docker', [
-        'run',
-        '--rm',
-        '--entrypoint',
-        'chown',
-        '-v',
-        `${DEMO_ROOT}:/demo`,
-        image,
-        '-R',
-        `${process.getuid?.() ?? 0}:${process.getgid?.() ?? 0}`,
-        '/demo',
-      ]).catch(() => undefined);
-    }
+    await stopDemoContainers();
+    await makeDemoRootRemovable();
     await deleteProvisionedAgents();
     await stopChild(orchestratorProcess);
     await stopChild(hostProcess);
@@ -344,10 +370,15 @@ async function main(): Promise<void> {
   log(`using Node ${resolveNode22Version()}`);
   if (process.env.KEEP_DEMO === '1') process.env.KEEP_E2E = '1';
 
+  if (process.env.KEEP_DEMO !== '1') {
+    await stopDemoContainers();
+    await makeDemoRootRemovable();
+    fs.rmSync(DEMO_ROOT, { recursive: true, force: true });
+  }
+
   await ensureRapidMlx();
   const oneCliUrl = await ensureOneCli();
 
-  if (process.env.KEEP_DEMO !== '1') fs.rmSync(DEMO_ROOT, { recursive: true, force: true });
   fs.mkdirSync(GROUPS_DIR, { recursive: true });
   stampUpgradeState();
 
@@ -398,6 +429,7 @@ async function main(): Promise<void> {
   await human.start();
   try {
     for (const agent of provisioned) {
+      await subscribeToAgent(human, agent);
       log(`smoke testing ${agent.jid}`);
       const reply = await waitForAgentReply(human, agent);
       log(`${agent.name} replied: ${reply}`);
