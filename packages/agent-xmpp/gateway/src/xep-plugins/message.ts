@@ -1,16 +1,23 @@
 /**
  * Message normalization and construction.
  *
- * The gateway JSON payload and reply marker are inspired by XEP-0432 and
- * XEP-0461 rather than strict wire implementations; their current shapes are
- * retained for compatibility. The content-type marker, XEP-0334 processing
- * hints, and XEP-0359 origin IDs use their standard namespaces.
+ * The JSON payload nests its content in a <json xmlns='urn:xmpp:json:0'>
+ * child per XEP-0335; `datatype` still carries a MIME type rather than a
+ * schema namespace, and the JSON body is the gateway's own
+ * kind/contentType/body envelope, not caller-defined XEP-0432 content —
+ * both are deliberate gateway conventions, not spec violations. The reply
+ * marker carries `to` per XEP-0461, but always uses `req.inReplyTo` as the
+ * id regardless of 1:1 vs groupchat context; the spec's groupchat-specific
+ * stanza-id-selection rule is not implemented. The content-type marker,
+ * XEP-0334 processing hints, and XEP-0359 origin IDs use their standard
+ * namespaces.
  *
  * @see https://xmpp.org/extensions/xep-0432.html
  * @see https://xmpp.org/extensions/xep-0481.html
  * @see https://xmpp.org/extensions/xep-0461.html
  * @see https://xmpp.org/extensions/xep-0334.html
  * @see https://xmpp.org/extensions/xep-0359.html
+ * @see https://xmpp.org/extensions/xep-0335.html
  */
 
 import { createHash } from 'crypto';
@@ -56,11 +63,7 @@ export function extractStableId(stanza: Element): string {
 function payloadText(stanza: Element): string | null {
   const payload = stanza.getChild('payload', JSON_NS);
   if (!payload) return null;
-  for (const child of payload.children) {
-    if (typeof child === 'string' && child.trim()) return child;
-  }
-  const text = payload.getChildText('');
-  return text || null;
+  return payload.getChildText('json', 'urn:xmpp:json:0') || null;
 }
 
 function parseJsonPayload(stanza: Element): { kind: MessageKind; contentType: string; body: unknown } | null {
@@ -132,9 +135,12 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
     }
   }
 
-  const mentions = stanza.getChild('mentions');
+  const mentions = stanza
+    .getChildren('mention', 'urn:xmpp:mentions:0')
+    .map((el) => el.attrs.jid as string)
+    .filter(Boolean);
   const extensions: Record<string, unknown> = {};
-  if (mentions) extensions.mentions = mentions.toString();
+  if (mentions.length) extensions.mentions = mentions;
 
   return {
     id,
@@ -204,22 +210,27 @@ export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string
   };
 
   const children: Element[] = [xml('body', {}, text)];
+  const isMuc = isMucJid(req.to);
 
   if (req.threadId) {
     children.push(xml('thread', {}, req.threadId));
   }
 
   if (req.inReplyTo) {
-    children.push(xml('reply', { xmlns: REPLY_NS, id: req.inReplyTo }));
+    // XEP-0461: bare JID is only a MAY for 1:1; groupchat wants the full JID.
+    children.push(xml('reply', { xmlns: REPLY_NS, id: req.inReplyTo, to: isMuc ? req.to : bareJid(req.to) }));
   }
 
   children.push(
     xml('origin-id', { xmlns: ORIGIN_ID_NS, id: id }),
     xml('content', { xmlns: CONTENT_TYPE_NS, type: contentType }),
-    xml('payload', { xmlns: JSON_NS, datatype: contentType }, JSON.stringify(payload)),
+    xml(
+      'payload',
+      { xmlns: JSON_NS, datatype: contentType },
+      xml('json', { xmlns: 'urn:xmpp:json:0' }, JSON.stringify(payload)),
+    ),
   );
 
-  const isMuc = isMucJid(req.to);
   const to = req.threadId && isMuc ? req.to : bareJid(req.to);
   const type = isMuc ? 'groupchat' : 'chat';
 

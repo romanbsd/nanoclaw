@@ -38,11 +38,15 @@ describe('message plugin', () => {
       xml(
         'payload',
         { xmlns: 'urn:xmpp:json-msg:0', datatype: 'application/json' },
-        JSON.stringify({
-          kind: 'task',
-          contentType: 'application/vnd.businessos.agent-task+json',
-          body: { task: 'Do something' },
-        }),
+        xml(
+          'json',
+          { xmlns: 'urn:xmpp:json:0' },
+          JSON.stringify({
+            kind: 'task',
+            contentType: 'application/vnd.businessos.agent-task+json',
+            body: { task: 'Do something' },
+          }),
+        ),
       ),
     );
     const msg = stanzaToAgentMessage(stanza, 'agents.test');

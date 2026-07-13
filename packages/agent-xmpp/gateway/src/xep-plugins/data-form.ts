@@ -1,7 +1,8 @@
 /**
  * XEP-0004 Data Forms — ask_user_question multiple-choice via list-single fields.
  * Outbound forms also carry XEP-0359 origin IDs. The optional reply marker uses
- * the XEP-0461 namespace but retains the gateway's legacy no-`to` shape.
+ * the XEP-0461 namespace including `to`; it always uses `req.inReplyTo` as the
+ * id regardless of 1:1 vs groupchat context (see message.ts header for detail).
  *
  * @see https://xmpp.org/extensions/xep-0004.html
  * @see https://xmpp.org/extensions/xep-0359.html
@@ -84,7 +85,9 @@ export function buildAskQuestionFormStanza(req: OutboundDeliverRequest, fromJid:
   }
 
   if (req.inReplyTo) {
-    children.push(xml('reply', { xmlns: REPLY_NS, id: req.inReplyTo }));
+    // XEP-0461: bare JID is only a MAY for 1:1; groupchat wants the full JID.
+    const isMuc = isMucJid(req.to);
+    children.push(xml('reply', { xmlns: REPLY_NS, id: req.inReplyTo, to: isMuc ? req.to : bareJid(req.to) }));
   }
 
   const isMuc = isMucJid(req.to);

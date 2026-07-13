@@ -1,7 +1,7 @@
 /**
  * XEP-0045 Multi-User Chat presence and groupchat messages.
- * The existing gateway-private <mentions/> payload is not XEP-0513 wire format;
- * XEP-0513 is the interoperability target for a future transport switch.
+ * Mentions use XEP-0513 wire format (jid-addressed; no begin/end offsets,
+ * since the gateway doesn't track where in the body text a mention occurs).
  *
  * @see https://xmpp.org/extensions/xep-0045.html
  * @see https://xmpp.org/extensions/xep-0513.html
@@ -56,9 +56,8 @@ export function buildRoomMessage(input: XmppSendRoomMessageInput, fromJid: strin
   );
   stanza.attrs.type = 'groupchat';
 
-  if (input.mentions?.length) {
-    const mentionEls = input.mentions.map((m) => xml('mention', { jid: m }));
-    stanza.append(xml('mentions', {}, ...mentionEls));
+  for (const m of input.mentions ?? []) {
+    stanza.append(xml('mention', { xmlns: 'urn:xmpp:mentions:0', jid: m }));
   }
 
   return stanza;
