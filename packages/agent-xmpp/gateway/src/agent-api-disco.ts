@@ -42,7 +42,6 @@ function features(...values: string[]): Element[] {
 const STANDARD_FEATURES = [
   'urn:xmpp:ping', // XEP-0199
   'urn:xmpp:receipts', // XEP-0184
-  'urn:xmpp:chat-markers:0', // XEP-0333
   'http://jabber.org/protocol/chatstates', // XEP-0085
   'urn:xmpp:reply:0', // XEP-0461
   'jabber:x:data', // XEP-0004

@@ -45,6 +45,7 @@ describe('disco features (XEP-0030)', () => {
     for (const ns of ['urn:xmpp:ping', 'urn:xmpp:receipts', 'http://jabber.org/protocol/chatstates', 'urn:xmpp:reply:0']) {
       expect(advertised).toContain(ns);
     }
+    expect(advertised).not.toContain('urn:xmpp:chat-markers:0');
   });
 });
 

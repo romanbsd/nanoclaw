@@ -368,6 +368,7 @@ async function main(): Promise<void> {
         .map((feature) => feature.attrs.var) ?? [];
     assert.ok(gatewayFeatures.includes(AGENT_API_NS));
     assert.ok(gatewayFeatures.includes(AGENT_DIRECTORY_NS));
+    assert.ok(!gatewayFeatures.includes('urn:xmpp:chat-markers:0'), 'gateway must not advertise unsupported XEP-0333');
 
     const directory = peer.waitForStanza((stanza) => stanza.is('iq') && stanza.attrs.id === directoryId);
     await peer.send(
