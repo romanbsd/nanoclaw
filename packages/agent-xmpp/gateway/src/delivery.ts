@@ -1,3 +1,11 @@
+/**
+ * Inbound delivery gating and routing. 1:1 (XMPP `chat`) messages always pass;
+ * groupchat (XEP-0045) messages are delivered only when the agent is mentioned —
+ * via XEP-0513 explicit mentions or the plaintext `@nick` fallback in routing.ts.
+ *
+ * @see https://xmpp.org/extensions/xep-0045.html
+ * @see https://xmpp.org/extensions/xep-0513.html
+ */
 import type { AgentMessage, BridgeFormResponsePayload, BridgeInboundPayload } from '@agent-xmpp/protocol';
 import { agentMessageText } from '@agent-xmpp/protocol';
 

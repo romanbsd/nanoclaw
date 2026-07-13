@@ -1,3 +1,18 @@
+/**
+ * Central inbound stanza dispatch for the component. Routes by stanza kind and spec:
+ *   presence            -> RFC 6121 §3 roster/probe handling (presence.ts)
+ *   ask-question submit -> XEP-0004 Data Forms (data-form.ts)
+ *   agent-task payloads -> gateway-private urn:businessos:agent-task:1 (task-stanza-codec.ts)
+ *   XEP-0085/0184/0333  -> chat states & receipts are swallowed, not delivered (receipts.ts)
+ *   message             -> normalized to AgentMessage (message.ts), then delivery-gated
+ *
+ * On accepted 1:1 messages the router emits an XEP-0085 composing state and, when the
+ * sender opted in with an XEP-0184 <request/>, a delivery receipt.
+ *
+ * @see https://www.rfc-editor.org/rfc/rfc6121#section-3
+ * @see https://xmpp.org/extensions/xep-0085.html
+ * @see https://xmpp.org/extensions/xep-0184.html
+ */
 import type { Element } from '@xmpp/xml';
 
 import type { AgentMessage } from '@agent-xmpp/protocol';

@@ -1,3 +1,10 @@
+/**
+ * Emits XEP-0085 Chat State Notifications on the agent's behalf (composing while
+ * the agent works, paused/inactive when it stops). States are directed to the same
+ * 1:1 resource or MUC room the inbound message came from.
+ *
+ * @see https://xmpp.org/extensions/xep-0085.html
+ */
 import type { Element } from '@xmpp/xml';
 
 import type { InboundChatTargets } from './delivery.js';

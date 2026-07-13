@@ -1,3 +1,15 @@
+/**
+ * Production IQ handler: routes incoming <iq> to the right responder by payload.
+ *   XEP-0199 ping           -> pong
+ *   XEP-0030 disco#info/items -> gateway/agent/operation discovery (agent-api-disco.ts)
+ *   XEP-0054 vCard-temp get  -> public agent identity
+ *   urn:businessos:agent-api:1 schema/registration -> gateway-private agent API
+ * Disco and API metadata are tenant-scoped; the vCard identity is public.
+ *
+ * @see https://xmpp.org/extensions/xep-0030.html
+ * @see https://xmpp.org/extensions/xep-0199.html
+ * @see https://xmpp.org/extensions/xep-0054.html
+ */
 import {
   AGENT_API_NS,
   AGENT_DIRECTORY_NS,

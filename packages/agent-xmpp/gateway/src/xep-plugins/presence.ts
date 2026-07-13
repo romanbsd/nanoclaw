@@ -5,6 +5,11 @@
  * accounts. The component therefore completes roster subscriptions and
  * answers server probes itself.
  *
+ * State mapping (RFC 6121):
+ *   subscribe   -> subscribed + available   (§3.1.4 approving an inbound request)
+ *   probe / ''  -> available                (§4.3 responding to a presence probe)
+ *   unsubscribe -> unsubscribed             (§3.3.2 canceling a subscription)
+ *
  * @see https://www.rfc-editor.org/rfc/rfc6121#section-3
  */
 import { xml, type Element } from '@xmpp/xml';
