@@ -101,18 +101,42 @@ function wrapPromptWithContext(text: string, systemInstructions?: string): strin
   return out;
 }
 
-function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> {
+/**
+ * Every env var that changes the spawned OpenCode server config lives here, so
+ * buildOpenCodeConfig and runtimeConfigKey stay in lockstep — a var that affects
+ * the config but is missing from the key would leave a stale shared runtime.
+ */
+function readOpenCodeConfigEnv() {
   const provider = process.env.OPENCODE_PROVIDER || 'anthropic';
-  const model = process.env.OPENCODE_MODEL;
-  const smallModel = process.env.OPENCODE_SMALL_MODEL;
-  const proxyUrl = process.env.ANTHROPIC_BASE_URL;
-  const providerNpm = process.env.OPENCODE_PROVIDER_NPM;
-  const providerName = process.env.OPENCODE_PROVIDER_NAME || provider;
-  const providerApiKey = process.env.OPENCODE_PROVIDER_API_KEY || 'placeholder';
-  const modelContextLimit = Number(process.env.OPENCODE_MODEL_CONTEXT_LIMIT || '0');
-  const modelOutputLimit = Number(process.env.OPENCODE_MODEL_OUTPUT_LIMIT || '0');
-  const agentName = process.env.OPENCODE_AGENT_NAME;
-  const agentPrompt = process.env.OPENCODE_AGENT_PROMPT;
+  return {
+    provider,
+    model: process.env.OPENCODE_MODEL,
+    smallModel: process.env.OPENCODE_SMALL_MODEL,
+    proxyUrl: process.env.ANTHROPIC_BASE_URL,
+    providerNpm: process.env.OPENCODE_PROVIDER_NPM,
+    providerName: process.env.OPENCODE_PROVIDER_NAME || provider,
+    providerApiKey: process.env.OPENCODE_PROVIDER_API_KEY || 'placeholder',
+    modelContextLimit: Number(process.env.OPENCODE_MODEL_CONTEXT_LIMIT || '0'),
+    modelOutputLimit: Number(process.env.OPENCODE_MODEL_OUTPUT_LIMIT || '0'),
+    agentName: process.env.OPENCODE_AGENT_NAME,
+    agentPrompt: process.env.OPENCODE_AGENT_PROMPT,
+  };
+}
+
+function buildOpenCodeConfig(options: ProviderOptions): Record<string, unknown> {
+  const {
+    provider,
+    model,
+    smallModel,
+    proxyUrl,
+    providerNpm,
+    providerName,
+    providerApiKey,
+    modelContextLimit,
+    modelOutputLimit,
+    agentName,
+    agentPrompt,
+  } = readOpenCodeConfigEnv();
 
   const providerModelId = model ? model.replace(new RegExp(`^${provider}/`), '') : undefined;
   const providerSmallModelId = smallModel ? smallModel.replace(new RegExp(`^${provider}/`), '') : undefined;
@@ -191,15 +215,7 @@ let sharedInit: Promise<SharedRuntime> | null = null;
 function runtimeConfigKey(options: ProviderOptions): string {
   return JSON.stringify({
     mcp: mcpServersToOpenCodeConfig(options.mcpServers),
-    model: process.env.OPENCODE_MODEL,
-    small: process.env.OPENCODE_SMALL_MODEL,
-    op: process.env.OPENCODE_PROVIDER,
-    npm: process.env.OPENCODE_PROVIDER_NPM,
-    name: process.env.OPENCODE_PROVIDER_NAME,
-    contextLimit: process.env.OPENCODE_MODEL_CONTEXT_LIMIT,
-    outputLimit: process.env.OPENCODE_MODEL_OUTPUT_LIMIT,
-    agentName: process.env.OPENCODE_AGENT_NAME,
-    agentPrompt: process.env.OPENCODE_AGENT_PROMPT,
+    env: readOpenCodeConfigEnv(),
   });
 }
 
