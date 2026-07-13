@@ -19,7 +19,7 @@ import {
   stanzaToAgentMessage,
 } from './xep-plugins/message.js';
 import { parseAskQuestionSubmit } from './xep-plugins/data-form.js';
-import { buildReceivedReceipt, isAckOrReceiptStanza } from './xep-plugins/receipts.js';
+import { buildReceivedReceipt, isAckOrReceiptStanza, requestsReceipt } from './xep-plugins/receipts.js';
 import { parseTaskEvent, parseTaskInvocation } from './task-stanza-codec.js';
 import { presenceResponses, type VirtualAgentIdentity } from './xep-plugins/presence.js';
 
@@ -116,7 +116,9 @@ export class StanzaRouter {
 
     await pushInboundToBridge(this.config, this.mailbox, ctx);
 
-    if (from) {
+    // XEP-0184: ack only 1:1 messages that explicitly requested a receipt.
+    // Groupchat receipts are not used (§5.5) and unsolicited ones spam the sender.
+    if (from && type === 'chat' && requestsReceipt(stanza)) {
       await this.sendForAgent(agentJid, buildReceivedReceipt(from, agentJid, stanzaId)).catch((err) => {
         console.error('[xmpp-gateway] received receipt send failed:', err);
       });

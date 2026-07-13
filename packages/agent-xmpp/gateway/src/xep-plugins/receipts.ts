@@ -27,6 +27,11 @@ export function isAckOrReceiptStanza(stanza: Element): boolean {
   return false;
 }
 
+/** XEP-0184: only ack when the sender opted in with <request/>. */
+export function requestsReceipt(stanza: Element): boolean {
+  return stanza.name === 'message' && stanza.getChild('request', RECEIPTS_NS) != null;
+}
+
 export function buildReceivedReceipt(to: string, from: string, messageId: string): Element {
   return xml(
     'message',

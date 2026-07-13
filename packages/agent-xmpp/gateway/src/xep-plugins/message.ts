@@ -135,9 +135,12 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
     }
   }
 
+  // XEP-0513: MUC mentions MUST address by `occupantid` (XEP-0421) when the room
+  // supports it; only outside MUC (or in occupant-id-less rooms) is `jid` used.
+  // Accept either so occupant-id-addressed mentions aren't silently dropped.
   const mentions = stanza
     .getChildren('mention', 'urn:xmpp:mentions:0')
-    .map((el) => el.attrs.jid as string)
+    .map((el) => (el.attrs.jid ?? el.attrs.occupantid) as string)
     .filter(Boolean);
   const extensions: Record<string, unknown> = {};
   if (mentions.length) extensions.mentions = mentions;

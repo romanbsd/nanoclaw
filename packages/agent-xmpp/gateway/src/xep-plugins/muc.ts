@@ -1,7 +1,9 @@
 /**
  * XEP-0045 Multi-User Chat presence and groupchat messages.
- * Mentions use XEP-0513 wire format (jid-addressed; no begin/end offsets,
- * since the gateway doesn't track where in the body text a mention occurs).
+ * Mentions use XEP-0513 wire format. Outbound uses the `jid` address form (the
+ * spec's non-anonymous fallback) — the gateway does not yet track XEP-0421
+ * occupant-ids, which XEP-0513 mandates for rooms that support them. No begin/end
+ * offsets, since the gateway doesn't track where in the body a mention occurs.
  *
  * @see https://xmpp.org/extensions/xep-0045.html
  * @see https://xmpp.org/extensions/xep-0513.html
