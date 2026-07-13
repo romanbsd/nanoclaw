@@ -37,6 +37,7 @@ import type {
 } from '@agent-xmpp/protocol';
 
 import { buildAskQuestionFormStanza, isAskQuestionContent } from './data-form.js';
+import { RECEIPTS_NS } from './receipts.js';
 
 const JSON_NS = 'urn:xmpp:json-msg:0';
 const ORIGIN_ID_NS = 'urn:xmpp:sid:0';
@@ -233,6 +234,12 @@ export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string
       xml('json', { xmlns: 'urn:xmpp:json:0' }, JSON.stringify(payload)),
     ),
   );
+
+  // XEP-0184 §5.1/§5.5: request a delivery receipt on 1:1 messages only (never MUC),
+  // so the gateway can confirm the peer received it and resend otherwise.
+  if (!isMuc) {
+    children.push(xml('request', { xmlns: RECEIPTS_NS }));
+  }
 
   // RFC 6121 section 8.5.2.1: preserve a full JID when replying to the
   // resource that originated a 1:1 chat. Proactive sends can still use bare JIDs.

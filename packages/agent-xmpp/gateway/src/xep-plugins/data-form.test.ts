@@ -45,6 +45,22 @@ describe('data-form plugin', () => {
     expect(form?.getChildText('instructions')).toBe('Which task would you like to start?');
   });
 
+  it('requests a delivery receipt on 1:1 forms but not in a MUC (XEP-0184)', () => {
+    const chat = buildAskQuestionFormStanza(
+      { from: 'agent@agents.test', to: 'human@example.com', content: payload },
+      'agent@agents.test',
+      payload,
+    );
+    expect(chat.getChild('request', 'urn:xmpp:receipts')).toBeDefined();
+
+    const muc = buildAskQuestionFormStanza(
+      { from: 'agent@agents.test', to: 'room@conference.example', content: payload },
+      'agent@agents.test',
+      payload,
+    );
+    expect(muc.getChild('request', 'urn:xmpp:receipts')).toBeUndefined();
+  });
+
   it('parses ask_question form submits', () => {
     const submitStanza = xml(
       'message',

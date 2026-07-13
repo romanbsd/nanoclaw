@@ -15,6 +15,7 @@ import { ulid } from 'ulid';
 import type { AskQuestionPayload, OutboundDeliverRequest } from '@agent-xmpp/protocol';
 
 import { bareJid, isMucJid } from './jid.js';
+import { RECEIPTS_NS } from './receipts.js';
 
 export const DATA_FORM_NS = 'jabber:x:data';
 export const ASK_QUESTION_FORM_TYPE = 'urn:xmpp:nanoclaw:ask-question:0';
@@ -91,6 +92,12 @@ export function buildAskQuestionFormStanza(req: OutboundDeliverRequest, fromJid:
   }
 
   const isMuc = isMucJid(req.to);
+  // XEP-0184 §5.1/§5.5: request a delivery receipt on 1:1 forms only (never MUC), so the
+  // form is tracked and resent like any other chat message sent through deliver().
+  if (!isMuc) {
+    children.push(xml('request', { xmlns: RECEIPTS_NS }));
+  }
+
   // RFC 6121 section 8.5.2.1: preserve the initiating resource for 1:1 replies.
   const to = req.threadId && isMuc ? req.to : isMuc ? bareJid(req.to) : req.to;
   const type = isMuc ? 'groupchat' : 'chat';

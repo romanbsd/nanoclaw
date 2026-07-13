@@ -1,10 +1,12 @@
 /**
  * Gateway-private agent-task extension transported in normal message stanzas.
- * XEP-0359 supplies correlation IDs and XEP-0184 requests wire delivery receipts;
- * the urn:businessos:agent-task:1 payload itself is not an XEP.
+ * XEP-0359 supplies correlation IDs; the urn:businessos:agent-task:1 payload itself is
+ * not an XEP. Invocations deliberately do NOT request XEP-0184 receipts: they are
+ * side-effecting and carry their own lifecycle-event ack path (accepted/progress/
+ * completed, keyed by task-id/correlation-id), so a blind receipt-driven resend would
+ * risk executing a task more than once. Reliability rides task idempotency, not receipts.
  *
  * @see https://xmpp.org/extensions/xep-0359.html
- * @see https://xmpp.org/extensions/xep-0184.html
  */
 import { AGENT_TASK_NS, type AgentTaskRecord } from '@agent-xmpp/protocol';
 import { xml, type Element } from '@xmpp/xml';
@@ -117,6 +119,5 @@ export function buildTaskInvocation(task: AgentTaskRecord): Element {
       },
       ...invokeChildren,
     ),
-    xml('request', { xmlns: 'urn:xmpp:receipts' }),
   );
 }

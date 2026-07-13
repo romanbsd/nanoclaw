@@ -9,13 +9,18 @@ export interface XmppSessionOptions {
   domain: string;
   username: string;
   password: string;
+  autoReceipts?: boolean;
 }
+
+const RECEIPTS_NS = 'urn:xmpp:receipts';
 
 export class XmppSession {
   private xmpp: ReturnType<typeof client>;
   private handlers: Array<(stanza: Element) => void> = [];
+  private autoReceipts: boolean;
 
   constructor(private opts: XmppSessionOptions) {
+    this.autoReceipts = opts.autoReceipts ?? false;
     this.xmpp = client({
       service: opts.service,
       domain: opts.domain,
@@ -25,6 +30,17 @@ export class XmppSession {
     });
     this.xmpp.on('stanza', (stanza) => {
       for (const h of this.handlers) h(stanza);
+      if (this.autoReceipts && stanza.is('message') && stanza.attrs.type !== 'groupchat') {
+        const id = String(stanza.attrs.id ?? '');
+        const to = String(stanza.attrs.from ?? '');
+        if (id && to && stanza.getChild('request', RECEIPTS_NS)) {
+          void this.xmpp
+            .send(
+              xml('message', { type: stanza.attrs.type ?? 'chat', to }, xml('received', { xmlns: RECEIPTS_NS, id })),
+            )
+            .catch((err: Error) => console.error('[xmpp-session] receipt send failed:', err.message));
+        }
+      }
     });
     this.xmpp.on('error', (err: Error) => console.error('[xmpp-session] error:', err.message));
   }
@@ -39,9 +55,7 @@ export class XmppSession {
   }
 
   async sendChat(to: string, body: string, id?: string): Promise<void> {
-    await this.xmpp.send(
-      xml('message', { type: 'chat', to, id: id || `msg-${Date.now()}` }, xml('body', {}, body)),
-    );
+    await this.xmpp.send(xml('message', { type: 'chat', to, id: id || `msg-${Date.now()}` }, xml('body', {}, body)));
   }
 
   async subscribe(to: string): Promise<void> {
@@ -50,6 +64,24 @@ export class XmppSession {
 
   async send(stanza: Element): Promise<void> {
     await this.xmpp.send(stanza);
+  }
+
+  setAutoReceipts(enabled: boolean): void {
+    this.autoReceipts = enabled;
+  }
+
+  collectStanzas(predicate: (stanza: Element) => boolean, durationMs: number): Promise<Element[]> {
+    return new Promise((resolve) => {
+      const matches: Element[] = [];
+      const handler = (stanza: Element) => {
+        if (predicate(stanza)) matches.push(stanza);
+      };
+      this.handlers.push(handler);
+      setTimeout(() => {
+        this.handlers = this.handlers.filter((h) => h !== handler);
+        resolve(matches);
+      }, durationMs);
+    });
   }
 
   waitForStanza(predicate: (stanza: Element) => boolean, timeoutMs = 30_000): Promise<Element> {

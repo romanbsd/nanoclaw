@@ -34,7 +34,7 @@ import {
   stanzaToAgentMessage,
 } from './xep-plugins/message.js';
 import { parseAskQuestionSubmit } from './xep-plugins/data-form.js';
-import { buildReceivedReceipt, isAckOrReceiptStanza, requestsReceipt } from './xep-plugins/receipts.js';
+import { buildReceivedReceipt, isAckOrReceiptStanza, receivedReceiptId, requestsReceipt } from './xep-plugins/receipts.js';
 import { parseTaskEvent, parseTaskInvocation } from './task-stanza-codec.js';
 import { presenceResponses, type VirtualAgentIdentity } from './xep-plugins/presence.js';
 
@@ -48,6 +48,7 @@ export class StanzaRouter {
     private mailbox: GatewayRuntimeMailbox,
     private sendForAgent: SendForAgentFn,
     private resolveVirtualAgent?: ResolveVirtualAgentFn,
+    private onReceipt?: (ackedId: string) => void,
   ) {}
 
   async handleIncoming(stanza: Element): Promise<void> {
@@ -100,7 +101,12 @@ export class StanzaRouter {
       await this.mailbox.deliverTaskInvocation(task);
       return;
     }
-    if (isAckOrReceiptStanza(stanza)) return;
+    if (isAckOrReceiptStanza(stanza)) {
+      // XEP-0184: a peer's <received/> confirms one of our outbound messages.
+      const acked = receivedReceiptId(stanza);
+      if (acked) this.onReceipt?.(acked);
+      return;
+    }
     const agentMsg = stanzaToAgentMessage(stanza, this.config.agentDomain);
     if (!agentMsg) return;
 

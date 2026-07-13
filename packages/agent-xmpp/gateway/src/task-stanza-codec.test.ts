@@ -20,6 +20,19 @@ describe('agent task stanza codec', () => {
     });
   });
 
+  it('does NOT request a delivery receipt (side-effecting; no blind resend)', () => {
+    // Task invocations rely on their own lifecycle-event acks + idempotency, not XEP-0184,
+    // so a lost receipt can never trigger a duplicate (re-executing) invocation.
+    const stanza = buildTaskInvocation({
+      taskId: 'task-1', rootTaskId: 'task-1', callerJid: 'caller@agents.test', targetJid: 'target@agents.test',
+      tenantId: 'acme', endpointId: 'xmpp+mcp://target@agents.test',
+      operation: 'review', apiVersion: '1.0.0', inputSchemaDigest: 'sha-256:input',
+      arguments: { branch: 'main' }, state: 'accepted', attempt: 1,
+      correlationId: 'mcp-1', createdAt: '2026-07-13T00:00:00.000Z',
+    });
+    expect(stanza.getChild('request', 'urn:xmpp:receipts')).toBeUndefined();
+  });
+
   it('round-trips task lifecycle events', () => {
     const event = {
       taskId: 'task-1',

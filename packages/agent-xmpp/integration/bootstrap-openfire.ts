@@ -126,6 +126,9 @@ async function verifyExternalComponentAuthentication(timeoutMs = 15_000): Promis
     componentService: COMPONENT_SERVICE,
     componentSecret: COMPONENT_SECRET,
     defaultAgentJid: `probe@${componentJid}`,
+    receiptTimeoutMs: 30_000,
+    receiptMaxResends: 2,
+    receiptSweepMs: 10_000,
   });
   let timer: NodeJS.Timeout | undefined;
   try {

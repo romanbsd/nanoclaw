@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { xml } from '@xmpp/xml';
 
 import { buildJoinPresence, buildRoomMessage, isMucJid } from './muc.js';
-import { buildReceivedReceipt, isAckOrReceiptStanza, requestsReceipt } from './receipts.js';
-import { stanzaToAgentMessage } from './message.js';
+import { buildReceivedReceipt, isAckOrReceiptStanza, receivedReceiptId, RECEIPTS_NS, requestsReceipt } from './receipts.js';
+import { buildOutboundStanza, stanzaToAgentMessage } from './message.js';
 import { buildGatewayInfo, DISCO_INFO_NS } from '../agent-api-disco.js';
 import { buildIqError, dispositionForStanza } from '../xmpp-component.js';
 
-const RECEIPTS_NS = 'urn:xmpp:receipts';
 const MENTIONS_NS = 'urn:xmpp:mentions:0';
 const MUC_NS = 'http://jabber.org/protocol/muc';
 const STANZA_ERROR_NS = 'urn:ietf:params:xml:ns:xmpp-stanzas';
@@ -108,6 +107,19 @@ describe('receipts plugin', () => {
       xml('request', { xmlns: RECEIPTS_NS }),
     );
     expect(requestsReceipt(asked)).toBe(true);
+  });
+
+  it('requests a receipt on 1:1 outbound but not in a MUC (XEP-0184 §5.5)', () => {
+    const chat = buildOutboundStanza({ from: 'bot@agents.test', to: 'user@test', content: 'hi' }, 'bot@agents.test');
+    expect(chat.getChild('request', RECEIPTS_NS)).toBeDefined();
+    const groupchat = buildOutboundStanza({ from: 'bot@agents.test', to: 'room@conference.test', content: 'hi' }, 'bot@agents.test');
+    expect(groupchat.getChild('request', RECEIPTS_NS)).toBeUndefined();
+  });
+
+  it('extracts the acked id from a <received/> (receivedReceiptId)', () => {
+    const receipt = xml('message', { from: 'u@test', to: 'bot@agents.test' }, xml('received', { xmlns: RECEIPTS_NS, id: 'm7' }));
+    expect(receivedReceiptId(receipt)).toBe('m7');
+    expect(receivedReceiptId(xml('message', {}, xml('body', {}, 'hi')))).toBeNull();
   });
 });
 

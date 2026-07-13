@@ -8,6 +8,34 @@ export interface GatewayConfig {
   componentService: string;
   componentSecret: string;
   defaultAgentJid: string;
+  /** XEP-0184: how long to wait for a <received/> before a resend is due (ms). */
+  receiptTimeoutMs: number;
+  /**
+   * XEP-0184: max resends of an un-acked message before giving up.
+   * Default 0 (observe-only): absence of a receipt is NOT evidence of failure — many
+   * clients/servers don't implement receipts and XMPP doesn't guarantee dedup of equal
+   * stanza/origin ids, so resending would duplicate ordinary messages. Only raise this
+   * for a deployment where every peer is known to support XEP-0184 and dedups.
+   */
+  receiptMaxResends: number;
+  /** How often the resend sweep runs (ms). */
+  receiptSweepMs: number;
+}
+
+/** Non-negative integer (0 is meaningful, e.g. observe-only resends). */
+function envNonNegInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : fallback;
+}
+
+/** Strictly-positive integer — for interval/timeout values where 0 would busy-loop. */
+function envPosInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
 }
 
 function env(name: string, fallback?: string): string {
@@ -28,5 +56,8 @@ export function loadConfig(): GatewayConfig {
     componentService: env('XMPP_COMPONENT_SERVICE', 'xmpp://127.0.0.1:5275'),
     componentSecret: env('XMPP_COMPONENT_SECRET'),
     defaultAgentJid: process.env.XMPP_DEFAULT_AGENT_JID || `assistant@${agentDomain}`,
+    receiptTimeoutMs: envPosInt('XMPP_RECEIPT_TIMEOUT_MS', 30_000),
+    receiptMaxResends: envNonNegInt('XMPP_RECEIPT_MAX_RESENDS', 0),
+    receiptSweepMs: envPosInt('XMPP_RECEIPT_SWEEP_MS', 10_000),
   };
 }

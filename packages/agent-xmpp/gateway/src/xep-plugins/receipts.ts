@@ -11,8 +11,14 @@ import { xml, type Element } from '@xmpp/xml';
 
 import { isChatStateStanza } from './chatstate.js';
 
-const RECEIPTS_NS = 'urn:xmpp:receipts';
+export const RECEIPTS_NS = 'urn:xmpp:receipts';
 const MARKERS_NS = 'urn:xmpp:chat-markers:0';
+
+/** The id a peer's <received/> acknowledges, or null if the stanza isn't a receipt. */
+export function receivedReceiptId(stanza: Element): string | null {
+  if (stanza.name !== 'message') return null;
+  return (stanza.getChild('received', RECEIPTS_NS)?.attrs.id as string | undefined) ?? null;
+}
 
 /** True for XEP-0085 chat states and XEP-0184/0333 ack stanzas with no conversational body. */
 export function isAckOrReceiptStanza(stanza: Element): boolean {
