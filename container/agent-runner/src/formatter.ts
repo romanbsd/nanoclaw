@@ -102,6 +102,8 @@ export interface RoutingContext {
    *  delivers from a task session; final-text `<message to>` blocks are inert
    *  and the final text auto-appends to the series run log. */
   taskRun: boolean;
+  /** Batch is a remote-agent task whose return path is task.complete/task.fail. */
+  taskFire: boolean;
 }
 
 function hasChatText(row: MessageInRow): boolean {
@@ -123,6 +125,13 @@ export function extractRouting(messages: MessageInRow[]): RoutingContext {
     threadId: routed?.thread_id ?? null,
     inReplyTo: routed?.id ?? null,
     taskRun: messages.length > 0 && messages.every((m) => m.kind === 'task'),
+    taskFire:
+      messages.length > 0 &&
+      messages.every((m) => {
+        if (m.kind !== 'task') return false;
+        const content = parseContent(m.content);
+        return typeof content.event === 'string' && typeof content.task === 'object' && content.task !== null;
+      }),
   };
 }
 
@@ -216,6 +225,18 @@ function formatTaskMessage(msg: MessageInRow): string {
     parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
   }
   parts.push('Instructions:', stripLegacyTaskContract(content.prompt || ''));
+  // A remote-agent task carries its operation arguments and pinned schemas in
+  // the structured envelope. Dropping that envelope left the model knowing
+  // only the operation name, so it could neither execute the request nor form
+  // a valid task.complete result. Keep the human-readable instruction first,
+  // then expose every remaining task field without duplicating formatter logic
+  // for individual gateway event types.
+  const taskData = { ...content };
+  delete taskData.prompt;
+  delete taskData.scriptOutput;
+  if (Object.keys(taskData).length > 0) {
+    parts.push('', 'Task data:', JSON.stringify(taskData, null, 2));
+  }
   return `<task${from} time="${escapeXml(time)}">${parts.join('\n')}</task>`;
 }
 

@@ -131,7 +131,10 @@ async function ensureRapidMlx(): Promise<void> {
     '--max-num-seqs',
     '1',
     '--max-concurrent-requests',
-    '1',
+    // Agent-to-agent calls briefly overlap the callee's final tool turn with
+    // the caller's continuation. Admit that queued request while keeping a
+    // single active generation (and therefore the same model-memory ceiling).
+    '2',
     // Each demo agent has a different prompt. Retaining Jane's KV cache can
     // leave too little Metal headroom to admit Mike's request on this model.
     '--disable-prefix-cache',

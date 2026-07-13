@@ -517,7 +517,7 @@ export async function processQuery(
           // Errors included: a failed run's text belongs in its log, not chat.
           // A corrective retry handles delivery only; its result is not a
           // second run summary.
-          if (resultRouting.taskRun && !taskBlockNudged) autoAppendTaskLog(event.text);
+          if (resultRouting.taskRun && !resultRouting.taskFire && !taskBlockNudged) autoAppendTaskLog(event.text);
           if (sent === 0 && event.isError === true && !resultRouting.taskRun) {
             // Non-retryable error turn (e.g. a 403 billing_error) with no
             // <message> envelope: deliver the notice instead of dropping it as
@@ -657,6 +657,14 @@ export function dispatchResultText(
   text: string,
   routing: RoutingContext,
 ): { sent: number; hasUnwrapped: boolean; taskBlocks: TaskMessageBlock[] } {
+  if (routing.taskFire) {
+    // Remote tasks return through task.complete/task.fail system actions. A
+    // provider may still emit final prose after the tool call; treating that
+    // prose as channel output leaks the callee's response to the human route,
+    // while the normal re-wrap nudge starts an unnecessary second model turn.
+    log('Ignoring provider final text for task batch; task actions own the return path');
+    return { sent: 0, hasUnwrapped: false, taskBlocks: [] };
+  }
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;

@@ -147,6 +147,34 @@ describe('task timestamps', () => {
     const result = formatMessages(getPendingMessages());
     expect(result).toContain(`time="${formatLocalTime('2026-01-05T12:00:00.000Z', TIMEZONE)}"`);
   });
+
+  it('includes structured remote task arguments and schemas', () => {
+    insertMessage('t1', 'task', {
+      prompt: 'Execute registered operation conversation.respond.',
+      task: {
+        taskId: 'task-1',
+        operation: 'conversation.respond',
+        arguments: { message: 'How are you?' },
+      },
+      event: 'task_invoke',
+      payload: {
+        operation: {
+          outputSchema: {
+            type: 'object',
+            properties: { response: { type: 'string' } },
+            required: ['response'],
+          },
+        },
+      },
+    });
+
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('Task data:');
+    expect(result).toContain('"taskId": "task-1"');
+    expect(result).toContain('"message": "How are you?"');
+    expect(result).toContain('"response"');
+    expect(result.match(/Execute registered operation/g)?.length).toBe(1);
+  });
 });
 
 describe('reply_to + quoted_message rendering', () => {

@@ -439,7 +439,9 @@ export class XmppAgentGatewayService {
         content: JSON.stringify({
           prompt:
             event === 'task_invoke'
-              ? `Execute registered operation ${task.operation}. Use task.complete, task.fail, task.report_progress, or task.request_input with taskId ${task.taskId}.`
+              ? `Execute registered operation ${task.operation} with the arguments in Task data. ` +
+                `Return only to the calling agent: do not send a channel message or use a <message> block. ` +
+                `Finish with task.complete, task.fail, task.report_progress, or task.request_input using taskId ${task.taskId}.`
               : `Task ${task.taskId} received ${event}.`,
           task: task,
           event,

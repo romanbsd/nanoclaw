@@ -469,6 +469,8 @@ const ERR_ROUTING = {
   channelType: 'discord',
   threadId: null,
   inReplyTo: 'm1',
+  taskRun: false,
+  taskFire: false,
 };
 
 describe('error result with no <message> envelope', () => {
@@ -495,6 +497,26 @@ describe('error result with no <message> envelope', () => {
     expect(getUndeliveredMessages()).toHaveLength(0);
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
+  });
+
+  it('does not deliver or re-wrap provider prose after a remote task action', async () => {
+    const { query, pushes } = makeResultQuery({
+      type: 'result',
+      text: '<message to="john">Mike says he is doing well.</message>',
+    });
+
+    await processQuery(
+      query,
+      { ...ERR_ROUTING, platformId: 'jane@example.org', channelType: 'xmpp', taskRun: true, taskFire: true },
+      ['task-1'],
+      'opencode',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(pushes).toHaveLength(0);
   });
 });
 
@@ -564,6 +586,7 @@ const TASK_ROUTING = {
   threadId: 'system:tasks:ser-1',
   inReplyTo: 't1',
   taskRun: true,
+  taskFire: false,
 };
 
 function taskLogRows(): Array<{ text: string }> {
