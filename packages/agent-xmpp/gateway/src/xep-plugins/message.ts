@@ -1,13 +1,12 @@
 /**
  * Message normalization and construction.
  *
- * The gateway JSON payload, content-type marker, and reply marker are inspired
- * by XEP-0432, XEP-0481, and XEP-0461 rather than strict wire implementations;
- * their current shapes are retained for compatibility. XEP-0334 processing
- * hints and XEP-0359 origin IDs use their standard namespaces.
+ * The gateway JSON payload and reply marker are inspired by XEP-0432 and
+ * XEP-0461 rather than strict wire implementations; their current shapes are
+ * retained for compatibility. The content-type marker, XEP-0334 processing
+ * hints, and XEP-0359 origin IDs use their standard namespaces.
  *
  * @see https://xmpp.org/extensions/xep-0432.html
- * @see https://xmpp.org/extensions/xep-0335.html
  * @see https://xmpp.org/extensions/xep-0481.html
  * @see https://xmpp.org/extensions/xep-0461.html
  * @see https://xmpp.org/extensions/xep-0334.html
@@ -36,7 +35,7 @@ const JSON_NS = 'urn:xmpp:json-msg:0';
 const ORIGIN_ID_NS = 'urn:xmpp:sid:0';
 const REPLY_NS = 'urn:xmpp:reply:0';
 const STORE_NS = 'urn:xmpp:hints';
-const CONTENT_TYPE_NS = 'urn:xmpp:content-type:0';
+const CONTENT_TYPE_NS = 'urn:xmpp:content';
 
 export function extractStableId(stanza: Element): string {
   const attrId = stanza.attrs.id as string | undefined;
@@ -118,7 +117,7 @@ export function stanzaToAgentMessage(stanza: Element, agentDomain: string): Agen
   let contentType = json?.contentType || 'text/plain';
   let body: unknown = json?.body ?? text;
 
-  const ctEl = stanza.getChild('content-type', CONTENT_TYPE_NS);
+  const ctEl = stanza.getChild('content', CONTENT_TYPE_NS);
   if (ctEl?.attrs.type) contentType = ctEl.attrs.type as string;
 
   if (!json && text.startsWith('{')) {
@@ -216,7 +215,7 @@ export function buildOutboundStanza(req: OutboundDeliverRequest, fromJid: string
 
   children.push(
     xml('origin-id', { xmlns: ORIGIN_ID_NS, id: id }),
-    xml('content-type', { xmlns: CONTENT_TYPE_NS, type: contentType }),
+    xml('content', { xmlns: CONTENT_TYPE_NS, type: contentType }),
     xml('payload', { xmlns: JSON_NS, datatype: contentType }, JSON.stringify(payload)),
   );
 
