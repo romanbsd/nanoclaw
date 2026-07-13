@@ -1,6 +1,7 @@
 import type { GatewayMailboxRequest } from '@agent-xmpp/protocol';
 
 import { registerDeliveryAction } from '../../delivery.js';
+import { unguarded } from '../../guard/index.js';
 import { XmppAgentGatewayService } from './service.js';
 
 const service = new XmppAgentGatewayService();
@@ -24,12 +25,16 @@ const actions: GatewayMailboxRequest['action'][] = [
 ];
 
 for (const action of actions) {
-  registerDeliveryAction(action, async (content, session, inDb) => {
-    const request: GatewayMailboxRequest = {
-      requestId: String(content.requestId ?? ''),
-      action,
-      payload: (content.payload ?? {}) as Record<string, unknown>,
-    };
-    await service.handle(request, session, inDb);
-  });
+  registerDeliveryAction(
+    action,
+    async (content, session, inDb) => {
+      const request: GatewayMailboxRequest = {
+        requestId: String(content.requestId ?? ''),
+        action,
+        payload: (content.payload ?? {}) as Record<string, unknown>,
+      };
+      await service.handle(request, session, inDb);
+    },
+    unguarded('XMPP gateway service validates caller identity, schemas, authorization, and task state'),
+  );
 }

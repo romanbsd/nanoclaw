@@ -232,11 +232,11 @@ describe('deliverSessionMessages — retry and permanent failure', () => {
     expect(delivered.has('out-flaky')).toBe(true);
   });
 
-  it('does not acknowledge a message when no channel adapter is registered (#2995)', async () => {
+  it('keeps a message pending when no channel adapter is registered (#2995)', async () => {
     // Regression: the real bridge used to return undefined when the exact
     // adapter lookup missed, and drainSession marked the row delivered with
     // platform_message_id=NULL even though no send happened. The bridge must
-    // throw so the row takes the normal retry → failed path. Uses the REAL
+    // throw so the row stays pending without consuming send-failure retries. Uses the REAL
     // createChannelDeliveryAdapter with an empty registry — the state after
     // an adapter factory returns null (missing credentials) at startup.
     seedAgentAndChannel();
@@ -251,19 +251,17 @@ describe('deliverSessionMessages — retry and permanent failure', () => {
     expect(getDeliveredIds(inDb).has('out-offline')).toBe(false);
     inDb.close();
 
-    // Attempts 2 and 3 — exhausts MAX_DELIVERY_ATTEMPTS
+    // Repeated polls while the adapter is absent must preserve the row.
     await deliverSessionMessages(session);
     await deliverSessionMessages(session);
 
-    // The row must end as status='failed', never 'delivered'
+    // No terminal delivered/failed record exists because no send was attempted.
     inDb = openInboundDb('ag-1', session.id);
     const row = inDb
       .prepare('SELECT status, platform_message_id FROM delivered WHERE message_out_id = ?')
       .get('out-offline') as { status: string; platform_message_id: string | null } | undefined;
     inDb.close();
-    expect(row).toBeDefined();
-    expect(row!.status).toBe('failed');
-    expect(row!.platform_message_id).toBeNull();
+    expect(row).toBeUndefined();
   });
 
   it('clears attempt counter on successful delivery', async () => {

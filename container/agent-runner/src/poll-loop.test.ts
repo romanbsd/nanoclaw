@@ -209,7 +209,7 @@ describe('routing', () => {
     expect(routing.inReplyTo).toBe('m1');
   });
 
-  it('prefers first chat row with text over empty receipt rows', () => {
+  it('prefers the most recent chat row with text over empty receipt rows', () => {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)

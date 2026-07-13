@@ -118,7 +118,7 @@ function hasChatText(row: MessageInRow): boolean {
  * (empty body, same platform_id as agent) do not hijack reply routing.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const routed = messages.find((m) => m.platform_id && hasChatText(m)) ?? messages[0];
+  const routed = [...messages].reverse().find((m) => m.platform_id && hasChatText(m)) ?? messages[0];
   return {
     platformId: routed?.platform_id ?? null,
     channelType: routed?.channel_type ?? null,
