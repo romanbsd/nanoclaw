@@ -337,10 +337,13 @@ async function deliverMessage(
     // reply goes out through the instance the message came in on. Otherwise
     // fall back to the by-platform lookup (default-instance-first).
     const originMg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+    const lookupPlatformId = msg.channel_type === 'xmpp' ? bareXmppJid(msg.platform_id) : msg.platform_id;
     const mg =
-      originMg && originMg.channel_type === msg.channel_type && originMg.platform_id === msg.platform_id
+      originMg &&
+      originMg.channel_type === msg.channel_type &&
+      samePlatformAddress(msg.channel_type, originMg.platform_id, msg.platform_id)
         ? originMg
-        : getMessagingGroupByPlatform(msg.channel_type, msg.platform_id);
+        : getMessagingGroupByPlatform(msg.channel_type, lookupPlatformId);
     if (!mg) {
       throw new Error(`unknown messaging group for ${msg.channel_type}/${msg.platform_id} (message ${msg.id})`);
     }
@@ -429,6 +432,14 @@ async function deliverMessage(
   clearOutbox(session.agent_group_id, session.id, msg.id);
 
   return platformMsgId;
+}
+
+function samePlatformAddress(channelType: string, left: string, right: string): boolean {
+  return left === right || (channelType === 'xmpp' && bareXmppJid(left) === bareXmppJid(right));
+}
+
+function bareXmppJid(jid: string): string {
+  return jid.split('/')[0] ?? jid;
 }
 
 /**

@@ -344,6 +344,47 @@ describe('mock provider', () => {
   });
 });
 
+describe('active-query follow-up routing', () => {
+  it('routes each result to the follow-up message that prompted it', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('john', 'John', 'channel', 'xmpp', 'john@example.org', NULL)`,
+      )
+      .run();
+    const provider = new MockProvider({}, (prompt) => `<message to="john">${prompt.includes('second') ? 'second' : 'first'}</message>`);
+    const query = provider.query({ prompt: 'first', cwd: '/tmp' });
+    const processing = processQuery(
+      query,
+      { platformId: 'john@example.org/smoke', channelType: 'xmpp', threadId: null, inReplyTo: 'first-message' },
+      ['first-message'],
+      'opencode',
+      undefined,
+      'first',
+      undefined,
+    );
+
+    setTimeout(() => {
+      getInboundDb()
+        .prepare(
+          `INSERT INTO messages_in
+             (id, kind, timestamp, status, trigger, on_wake, platform_id, channel_type, content)
+           VALUES ('second-message', 'chat', ?, 'pending', 1, 0, 'john@example.org/client-1', 'xmpp', ?)`,
+        )
+        .run(new Date().toISOString(), JSON.stringify({ text: 'second' }));
+    }, 100);
+    setTimeout(() => query.end(), 900);
+    await processing;
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(2);
+    expect(out[0].platform_id).toBe('john@example.org/smoke');
+    expect(out[0].in_reply_to).toBe('first-message');
+    expect(out[1].platform_id).toBe('john@example.org/client-1');
+    expect(out[1].in_reply_to).toBe('second-message');
+  });
+});
+
 describe('end-to-end with mock provider', () => {
   it('should read messages_in, process with mock provider, write messages_out', async () => {
     // Insert a chat message into inbound DB
@@ -454,6 +495,44 @@ describe('error result with no <message> envelope', () => {
     expect(getUndeliveredMessages()).toHaveLength(0);
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
+  });
+});
+
+describe('XMPP named-destination correlation', () => {
+  it('keeps the current full-JID route instead of an older bare-JID message', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
+         VALUES ('john', 'John', 'channel', 'xmpp', 'john@example.org', NULL)`,
+      )
+      .run();
+    insertMessage('old-message', 'chat', { text: 'old' });
+    getInboundDb()
+      .prepare("UPDATE messages_in SET channel_type = 'xmpp', platform_id = 'john@example.org' WHERE id = 'old-message'")
+      .run();
+
+    const { query } = makeResultQuery({
+      type: 'result',
+      text: '<message to="john">Jane says she is well.</message>',
+    });
+    await processQuery(
+      query,
+      {
+        platformId: 'john@example.org/client-1',
+        channelType: 'xmpp',
+        threadId: null,
+        inReplyTo: 'current-message',
+      },
+      ['current-message'],
+      'opencode',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    const [out] = getUndeliveredMessages();
+    expect(out.platform_id).toBe('john@example.org/client-1');
+    expect(out.in_reply_to).toBe('current-message');
   });
 });
 

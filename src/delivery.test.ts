@@ -408,3 +408,44 @@ describe('deliverSessionMessages — task_log rows (one-door task delivery)', ()
     expect(delivered.has('log-1')).toBe(true);
   });
 });
+
+describe('deliverSessionMessages — XMPP resource replies', () => {
+  it('authorizes against the bare-JID origin and delivers to the full JID', async () => {
+    createAgentGroup({
+      id: 'ag-xmpp',
+      name: 'XMPP Agent',
+      folder: 'xmpp-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-xmpp',
+      channel_type: 'xmpp',
+      platform_id: 'john@example.org',
+      name: 'John',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    const { session } = resolveSession('ag-xmpp', 'mg-xmpp', null, 'shared');
+    const outDb = new Database(outboundDbPath('ag-xmpp', session.id));
+    outDb
+      .prepare(
+        `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
+       VALUES ('out-xmpp-resource', ?, 'chat', 'john@example.org/client-1', 'xmpp', ?)`,
+      )
+      .run(now(), JSON.stringify({ text: 'reply' }));
+    outDb.close();
+
+    const recipients: string[] = [];
+    setDeliveryAdapter({
+      async deliver(_channelType, platformId) {
+        recipients.push(platformId);
+        return 'xmpp-message-1';
+      },
+    });
+
+    await deliverSessionMessages(session);
+    expect(recipients).toEqual(['john@example.org/client-1']);
+  });
+});

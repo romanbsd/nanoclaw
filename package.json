@@ -26,7 +26,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build:xmpp": "pnpm --filter @agent-xmpp/protocol build && pnpm --filter @agent-xmpp/gateway build",
-    "test:xmpp-e2e": "pnpm run build:xmpp && pnpm --filter @agent-xmpp/integration e2e:embedded"
+    "test:xmpp-e2e": "pnpm run build:xmpp && pnpm --filter @agent-xmpp/integration e2e:embedded",
+    "demo:xmpp-agents": "bash scripts/run-xmpp-two-agents-demo.sh"
   },
   "dependencies": {
     "@agent-xmpp/gateway": "workspace:*",

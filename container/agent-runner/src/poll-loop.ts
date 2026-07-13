@@ -359,6 +359,10 @@ export async function processQuery(
   // the same prompt again. Unused (and unmaintained) when the provider
   // doesn't implement `onExchangeComplete`.
   const archivePrompts: string[] = [initialPrompt];
+  // OpenCode keeps one query stream alive across several user turns. Each
+  // result must use the route of the prompt it answers, not the route that
+  // happened to open the long-lived stream.
+  const resultRoutes: RoutingContext[] = [routing];
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -435,11 +439,14 @@ export async function processQuery(
 
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
+        const followUpRouting = extractRouting(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
         taskBlockNudged = false;
+        setCurrentInReplyTo(followUpRouting.inReplyTo);
         query.push(prompt);
         archivePrompts.push(prompt);
+        resultRoutes.push(followUpRouting);
         markCompleted(keptIds);
       } catch (err) {
         // Without this catch the rejection escapes the void IIFE and Node
@@ -494,6 +501,7 @@ export async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        const resultRouting = resultRoutes[0] ?? routing;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -502,20 +510,20 @@ export async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          const { sent, hasUnwrapped, taskBlocks } = dispatchResultText(event.text, routing);
-          const willRetryTaskBlocks = shouldNudgeTaskBlocks(routing.taskRun, taskBlocks, taskBlockNudged);
+          const { sent, hasUnwrapped, taskBlocks } = dispatchResultText(event.text, resultRouting);
+          const willRetryTaskBlocks = shouldNudgeTaskBlocks(resultRouting.taskRun, taskBlocks, taskBlockNudged);
           // One-door task delivery: the final text becomes the run log entry
           // while explicit append-log calls remain optional additive notes.
           // Errors included: a failed run's text belongs in its log, not chat.
           // A corrective retry handles delivery only; its result is not a
           // second run summary.
-          if (routing.taskRun && !taskBlockNudged) autoAppendTaskLog(event.text);
-          if (sent === 0 && event.isError === true && !routing.taskRun) {
+          if (resultRouting.taskRun && !taskBlockNudged) autoAppendTaskLog(event.text);
+          if (sent === 0 && event.isError === true && !resultRouting.taskRun) {
             // Non-retryable error turn (e.g. a 403 billing_error) with no
             // <message> envelope: deliver the notice instead of dropping it as
             // scratchpad, and skip the re-wrap nudge — it would just re-hammer
             // the failing gateway turn after turn.
-            deliverErrorResult(event.text, routing);
+            deliverErrorResult(event.text, resultRouting);
             notifyExchangeComplete(onExchangeComplete, {
               prompt: archivePrompts[0] ?? initialPrompt,
               result: event.text,
@@ -523,6 +531,7 @@ export async function processQuery(
               status: 'error',
             });
             archivePrompts.shift();
+            resultRoutes.shift();
           } else {
             const willRetryWrapping = hasUnwrapped && !unwrappedNudged;
             notifyExchangeComplete(onExchangeComplete, {
@@ -552,9 +561,15 @@ export async function processQuery(
             // A retry result (wrapping or task-block nudge) answers the SAME
             // user prompt — keep it queued so the retry archives against it,
             // not the nudge text.
-            if (!willRetryWrapping && !willRetryTaskBlocks) archivePrompts.shift();
+            if (!willRetryWrapping && !willRetryTaskBlocks) {
+              archivePrompts.shift();
+              resultRoutes.shift();
+            }
           }
-        } else archivePrompts.shift();
+        } else {
+          archivePrompts.shift();
+          resultRoutes.shift();
+        }
       }
     }
   } catch (err) {
@@ -759,13 +774,25 @@ export function autoAppendTaskLog(text: string): void {
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
-  const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
+  const configuredPlatformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Resolve thread_id per-destination from the most recent inbound message
   // that came from this same channel+platform. In agent-shared sessions,
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
-  const destRouting = resolveDestinationThread(channelType, platformId);
+  // A named XMPP destination is stored as a stable bare JID, while the current
+  // inbound route can be a full JID so the reply reaches the initiating client
+  // resource. Treat those as the same logical destination and retain the
+  // current message correlation instead of resolving an older bare-JID row.
+  const currentDestination =
+    channelType === routing.channelType &&
+    routing.platformId !== null &&
+    (configuredPlatformId === routing.platformId ||
+      (channelType === 'xmpp' && bareXmppJid(configuredPlatformId) === bareXmppJid(routing.platformId)));
+  const platformId = currentDestination ? routing.platformId : configuredPlatformId;
+  const destRouting = currentDestination
+    ? { threadId: routing.threadId, inReplyTo: routing.inReplyTo }
+    : resolveDestinationThread(channelType, configuredPlatformId);
   writeMessageOut({
     id: generateId(),
     in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,
@@ -775,6 +802,10 @@ function sendToDestination(dest: DestinationEntry, body: string, routing: Routin
     thread_id: destRouting?.threadId ?? null,
     content: JSON.stringify({ text: body }),
   });
+}
+
+function bareXmppJid(jid: string): string {
+  return jid.split('/')[0] ?? jid;
 }
 
 /**

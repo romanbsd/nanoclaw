@@ -181,6 +181,17 @@ async function main(): Promise<void> {
       [agents[0].manifest.agent.jid, 'for alpha'],
       [agents[1].manifest.agent.jid, 'for beta'],
     ]);
+    assert.match(mailbox.inbound[0].replyTo ?? '', /^john@example\.org\/.+/);
+
+    const resourceReply = user.waitForStanza(
+      (stanza) => stanza.is('message') && stanza.getChildText('body') === 'resource-specific reply',
+    );
+    await gateway.deliver({
+      from: agents[0].manifest.agent.jid,
+      to: mailbox.inbound[0].replyTo!,
+      content: 'resource-specific reply',
+    });
+    assert.equal((await resourceReply).attrs.to, mailbox.inbound[0].replyTo);
 
     await gateway.deliver({
       from: agents[0].manifest.agent.jid,

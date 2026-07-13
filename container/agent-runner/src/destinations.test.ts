@@ -8,6 +8,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  delete process.env.XMPP_AGENT_JID;
   closeSessionDb();
 });
 
@@ -46,7 +47,7 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
   it('handles the no-destination case without crashing', () => {
     const prompt = buildSystemPromptAddendum('Casa');
 
-    expect(prompt).toContain('no configured destinations');
+    expect(prompt).toContain('no configured human destinations');
     expect(prompt).not.toContain('default to addressing');
   });
 
@@ -72,5 +73,16 @@ describe('buildSystemPromptAddendum — multi-destination routing guidance', () 
     expect(prompt).toContain('Only notify someone when the task asks');
     expect(prompt).not.toContain('<message to=');
     expect(prompt).not.toContain('default to addressing');
+  });
+
+  it('describes the current remote-agent API without retired XMPP tools', () => {
+    process.env.XMPP_AGENT_JID = 'mike@agents.test';
+
+    const prompt = buildSystemPromptAddendum('Mike');
+
+    expect(prompt).toContain('agents.discover_endpoints');
+    expect(prompt).toContain('agents.call_tool');
+    expect(prompt).toContain('conversation.respond');
+    expect(prompt).not.toContain('xmpp.send_message');
   });
 });

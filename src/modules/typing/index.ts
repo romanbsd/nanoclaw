@@ -157,6 +157,17 @@ export function startTypingRefresh(
     }
 
     // Out of grace AND heartbeat stale — agent is idle, stop refreshing.
+    // Clear before forgetting the target. Otherwise a provider failure or a
+    // long silent generation can leave clients displaying "composing"
+    // forever, and a later terminal response has no target left to clear.
+    void setTypingState(
+      'cleared',
+      entry.channelType,
+      entry.platformId,
+      entry.threadId,
+      entry.instance,
+      entry.agentGroupId,
+    );
     clearInterval(entry.interval);
     typingRefreshers.delete(sessionId);
   }, TYPING_REFRESH_MS);

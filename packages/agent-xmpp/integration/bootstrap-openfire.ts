@@ -11,12 +11,16 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { createComponentSession } from '../gateway/src/xmpp-component.js';
+
 const OPENFIRE_URL = process.env.OPENFIRE_URL || 'http://127.0.0.1:9090';
 const HTTP_BIND_HOST_PORT = process.env.E2E_HTTP_BIND_PORT || '17070';
 const ADMIN_USER = process.env.OPENFIRE_ADMIN_USER || process.env.OPENFIRE_E2E_ADMIN_USER || 'admin';
 const ADMIN_PASS = process.env.OPENFIRE_ADMIN_PASS || process.env.OPENFIRE_E2E_ADMIN_PASS || 'admin';
 const REST_SECRET = process.env.OPENFIRE_REST_SECRET || process.env.OPENFIRE_E2E_REST_SECRET || 'e2e-rest-secret';
 const COMPONENT_SECRET = process.env.XMPP_COMPONENT_SECRET || 'component-secret';
+const COMPONENT_SERVICE = process.env.XMPP_COMPONENT_SERVICE ||
+  `xmpp://127.0.0.1:${process.env.E2E_COMPONENT_PORT || '15275'}`;
 const XMPP_DOMAIN = process.env.XMPP_DOMAIN || 'example.org';
 const PINGER_USER = process.env.XMPP_PINGER_USER || 'john';
 const PINGER_PASS = process.env.XMPP_PINGER_PASS || 'secret';
@@ -111,6 +115,34 @@ async function ensureComponentSecret(cookieJar: string): Promise<void> {
     throw new Error('failed to set external component default secret');
   }
   console.log('[bootstrap] set external component default secret');
+}
+
+async function verifyExternalComponentAuthentication(timeoutMs = 15_000): Promise<void> {
+  const componentJid = `bootstrap-probe.${XMPP_DOMAIN}`;
+  const probe = createComponentSession({
+    gatewayId: 'bootstrap-probe',
+    componentJid,
+    agentDomain: componentJid,
+    componentService: COMPONENT_SERVICE,
+    componentSecret: COMPONENT_SECRET,
+    defaultAgentJid: `probe@${componentJid}`,
+  });
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    await Promise.race([
+      probe.start(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`XEP-0114 authentication timed out at ${COMPONENT_SERVICE}`)),
+          timeoutMs,
+        );
+      }),
+    ]);
+    console.log('[bootstrap] verified XEP-0114 external component authentication');
+  } finally {
+    if (timer) clearTimeout(timer);
+    await probe.stop().catch(() => undefined);
+  }
 }
 
 async function ensurePinger(cookieJar: string): Promise<void> {
@@ -424,6 +456,7 @@ async function main(): Promise<void> {
   await ensureRestApiSecret(cookieJar);
   await ensureWildcardExcludes(cookieJar);
   await ensureDemoMucRoom();
+  await verifyExternalComponentAuthentication();
   console.log('[bootstrap] done');
   await fs.unlink(cookieJar).catch(() => undefined);
 }

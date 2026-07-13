@@ -96,10 +96,8 @@ export function buildSystemPromptAddendum(assistantName?: string, mode: SessionM
 function buildDestinationsSection(mode: SessionMode): string {
   const all = getAllDestinations();
   const lines = ['## Sending messages', ''];
-
   if (all.length === 0) {
-    lines.push('You currently have no configured destinations. You cannot send messages until an admin wires one up.');
-    if (mode.kind === 'chat') return lines.join('\n');
+    lines.push('You currently have no configured human destinations.');
   } else if (all.length === 1) {
     const d = all[0];
     lines.push(`Your destination is \`${d.name}\`${destinationLabel(d)}.`);
@@ -109,7 +107,6 @@ function buildDestinationsSection(mode: SessionMode): string {
       lines.push(`- \`${d.name}\`${destinationLabel(d)}`);
     }
   }
-
   lines.push('');
 
   if (mode.kind === 'task') {
@@ -121,28 +118,39 @@ function buildDestinationsSection(mode: SessionMode): string {
     return lines.join('\n');
   }
 
-  lines.push(
-    'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
-  );
+  if (all.length > 0) {
+    lines.push(
+      'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
+    );
+  }
   if (process.env.XMPP_AGENT_JID) {
     lines.push('');
     lines.push(
-      '**Destinations name human chat peers only.** Other NanoClaw agents on this gateway appear under **Peer agents** (below) and via `xmpp.discover_agents` — use `xmpp.send_message` with their JID to reach them.',
+      '**Destinations name human chat peers only.** Other NanoClaw agents are remote MCP endpoints. Use `agents.discover_endpoints` with the agent name or JID, then `agents.call_tool` with the returned endpoint and its `conversation.respond` operation when you need that agent\'s answer in this turn. Return the remote result to the requesting human; do not stop after merely saying you will look it up.',
     );
   }
-  lines.push('');
-  lines.push(
-    'When replying to an incoming message, default to addressing the destination it came `from` (every inbound `<message>` tag carries a `from="name"` attribute). Pick a different destination when the request asks for it (e.g., "tell Laura that…").',
-  );
-  lines.push('');
-  lines.push(
-    'The `send_message` MCP tool is the same delivery, available mid-turn — handy for a quick acknowledgment ("on it") before a slow tool call. Always pass its explicit `to` destination. Each `send_message` call and each final-response `<message>` block lands as its own message in the conversation, so they read as a sequence rather than as one combined reply.',
-  );
-  lines.push('');
-  lines.push(
-    'For a short turn, do not narrate. For longer work, send one acknowledgment and then updates only at meaningful milestones, especially before slow operations. Never narrate micro-steps; finish with the outcome, not a play-by-play.',
-  );
+  if (all.length > 0) {
+    lines.push('');
+    lines.push(
+      'When replying to an incoming message, default to addressing the destination it came `from` (every inbound `<message>` tag carries a `from="name"` attribute). Pick a different destination when the request asks for it (e.g., "tell Laura that…").',
+    );
+    if (toolEnabled('send_message')) {
+      lines.push('');
+      lines.push(
+        'The `send_message` MCP tool is the same delivery, available mid-turn — handy for a quick acknowledgment ("on it") before a slow tool call. Always pass its explicit `to` destination. Each `send_message` call and each final-response `<message>` block lands as its own message in the conversation, so they read as a sequence rather than as one combined reply.',
+      );
+    }
+    lines.push('');
+    lines.push(
+      'For a short turn, do not narrate. For longer work, send one acknowledgment and then updates only at meaningful milestones, especially before slow operations. Never narrate micro-steps; finish with the outcome, not a play-by-play.',
+    );
+  }
   return lines.join('\n');
+}
+
+function toolEnabled(name: string): boolean {
+  const configured = process.env.NANOCLAW_MCP_TOOL_ALLOWLIST;
+  return !configured || configured.split(',').map((item) => item.trim()).includes(name);
 }
 
 function destinationLabel(d: DestinationEntry): string {

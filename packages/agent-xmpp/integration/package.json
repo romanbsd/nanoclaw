@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "e2e:embedded": "node ../../../node_modules/tsx/dist/cli.mjs e2e-embedded-gateway.ts",
-    "bootstrap": "node ../../../node_modules/tsx/dist/cli.mjs bootstrap-openfire.ts"
+    "bootstrap": "node ../../../node_modules/tsx/dist/cli.mjs bootstrap-openfire.ts",
+    "demo:local-agents": "node ../../../node_modules/tsx/dist/cli.mjs run-local-agents-demo.ts"
   },
   "dependencies": {
     "@agent-xmpp/gateway": "workspace:*",

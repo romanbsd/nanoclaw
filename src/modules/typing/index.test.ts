@@ -38,6 +38,28 @@ afterEach(() => {
 });
 
 describe('startTypingRefresh — instance forwarding', () => {
+  it('clears the platform state before dropping a stale refresher', async () => {
+    const cleared: Call[] = [];
+    setTypingAdapter({
+      async setTyping() {},
+      async clearTyping(channelType, platformId, threadId, instance) {
+        cleared.push({ channelType, platformId, threadId, instance });
+      },
+    });
+    startTypingRefresh('sess-1', 'ag-1', 'xmpp', 'john@example.org/client', null, 'xmpp');
+
+    await vi.advanceTimersByTimeAsync(16_500);
+
+    expect(cleared).toEqual([
+      {
+        channelType: 'xmpp',
+        platformId: 'john@example.org/client',
+        threadId: null,
+        instance: 'xmpp',
+      },
+    ]);
+  });
+
   it('immediate tick passes the instance to the adapter', async () => {
     const calls = captureAdapter();
     startTypingRefresh('sess-1', 'ag-1', 'slack', 'slack:C1', null, 'slack-tester');
