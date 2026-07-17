@@ -20,7 +20,6 @@ import type { OutboundFile } from './channels/adapter.js';
 import { normalizeChannelPlatformId } from './channels/channel-registry.js';
 import { DATA_DIR } from './config.js';
 import { ensureContainedInboxDir, isPathInside } from './inbox-safety.js';
-import { getAgentGroup } from './db/agent-groups.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
@@ -168,9 +167,8 @@ export function initSessionFolder(agentGroupId: string, sessionId: string): void
  * destination resolves to the conversation this session is bound to.
  * Derived from session.messaging_group_id → messaging_groups row + session.thread_id.
  *
- * Called on every container wake alongside the agent-to-agent module's
- * writeDestinations() (when installed) so the latest routing is always in
- * place, including after admin rewiring.
+ * Called on container wake to seed older or externally-created session DBs.
+ * Addressed inbound writes maintain the route atomically thereafter.
  */
 export function writeSessionRouting(agentGroupId: string, sessionId: string): void {
   const dbPath = inboundDbPath(agentGroupId, sessionId);
@@ -181,6 +179,11 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
 
   const db = openInboundDb(agentGroupId, sessionId);
   try {
+    // writeSessionMessage owns routing once a session has received an addressed
+    // message. Do not recompute and overwrite that authoritative reply route on
+    // every wake.
+    if (db.prepare('SELECT 1 FROM session_routing WHERE id = 1').get()) return;
+
     // Prefer the latest address actually delivered to this session. This is
     // the authoritative reply route for shared sessions and for transports
     // where the receiving conversation address differs from the sender.

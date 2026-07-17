@@ -1,7 +1,7 @@
 # Agent XMPP Adapter API Surface
 
-Version: 0.1  
-Status: Draft  
+Version: 0.1
+Status: Draft
 Purpose: Define the thin API layer that lets LLM agents communicate over XMPP without requiring agents to understand XMPP stanzas, XEP-specific XML, or server internals.
 
 ---

@@ -28,7 +28,7 @@ import {
   VCARD_TEMP_NS,
   type Element,
 } from '@agent-xmpp/gateway';
-import { DEFAULT_PROTOCOL_NAMESPACES, type AgentXmppNamespaces } from '@agent-xmpp/protocol';
+import { DEFAULT_PROTOCOL_NAMESPACES, bareJid, type AgentXmppNamespaces } from '@agent-xmpp/protocol';
 
 import { XmppAgentGatewayStore } from '../modules/xmpp-agent-gateway/store.js';
 
@@ -45,7 +45,7 @@ export function createXmppAgentIqHandler(options: XmppAgentIqOptions): (stanza: 
   const store = options.store ?? new XmppAgentGatewayStore(namespaces);
   return (stanza) => {
     const from = String(stanza.attrs.from ?? '');
-    const to = String(stanza.attrs.to ?? '').split('/')[0] ?? '';
+    const to = bareJid(String(stanza.attrs.to ?? ''));
     const info = stanza.getChild('query', DISCO_INFO_NS);
     const items = stanza.getChild('query', DISCO_ITEMS_NS);
     const schema = stanza.getChild('schema', namespaces.api);
@@ -57,7 +57,7 @@ export function createXmppAgentIqHandler(options: XmppAgentIqOptions): (stanza: 
     }
     const registration = parseManifestRegistration(stanza, namespaces);
     if (registration) {
-      const sender = from.split('/')[0] ?? from;
+      const sender = bareJid(from);
       if (registration.agent.jid !== sender) return null;
       return buildManifestRegistrationResult(stanza, store.registerManifest(registration, tenant), namespaces);
     }

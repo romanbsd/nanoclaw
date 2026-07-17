@@ -2,7 +2,7 @@ import { DEFAULT_PROTOCOL_NAMESPACES, type AgentApiManifest, type AgentXmppNames
 import { provisionAgentIdentity } from './provision-identity.js';
 import { OpenfireClient, loadOpenfireConfigFromEnv, usernameFromJid } from './openfire-client.js';
 import type { OpenfireClientConfig } from './openfire-client.js';
-import type { McpServerSpec, NanoclawAgentHost } from './nanoclaw-host.js';
+import type { McpServerSpec, XmppAgentHost } from './nanoclaw-host.js';
 
 export interface ProvisionNanoclawAgentRequest {
   name: string;
@@ -36,7 +36,7 @@ export interface ProvisionNanoclawAgentResult {
 }
 
 export interface ProvisionNanoclawAgentOptions {
-  host: NanoclawAgentHost;
+  host: XmppAgentHost;
   openfireClient?: OpenfireClient;
   openfireConfig?: OpenfireClientConfig;
   baseDomain?: string;

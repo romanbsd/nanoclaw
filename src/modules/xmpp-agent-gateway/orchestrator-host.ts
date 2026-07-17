@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type {
   McpServerSpec,
-  NanoclawAgentHost,
+  XmppAgentHost,
   NanoclawAgentProvision,
   NanoclawAgentProvisionResult,
   NanoclawAgentRecord,
@@ -31,6 +31,7 @@ import {
   createOrchestratorAgent,
   getOrchestratorAgent,
   listOrchestratorAgents,
+  parseOrchestratorSpawnEnv,
   type OrchestratorAgent,
 } from './orchestrator-store.js';
 
@@ -44,16 +45,6 @@ function buildMcpServers(
   return Object.fromEntries((specs ?? []).map(({ name, command, args, env }) => [name, { command, args, env }]));
 }
 
-function parseSpawnEnv(raw: string | null | undefined): Record<string, string> {
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw) as Record<string, string>;
-    // eslint-disable-next-line no-catch-all/no-catch-all -- tolerate legacy malformed rows on reads
-  } catch {
-    return {};
-  }
-}
-
 function toRecord(row: OrchestratorAgent): NanoclawAgentRecord {
   const group = getAgentGroup(row.agent_group_id);
   return {
@@ -64,12 +55,12 @@ function toRecord(row: OrchestratorAgent): NanoclawAgentRecord {
     jid: getXmppAgentIdentity(row.agent_group_id)?.jid ?? null,
     tenantId: row.tenant_id,
     mockScenario: row.mock_scenario,
-    spawnEnv: parseSpawnEnv(row.spawn_env),
+    spawnEnv: parseOrchestratorSpawnEnv(row.spawn_env) ?? {},
     createdAt: row.created_at,
   };
 }
 
-export class NanoclawXmppAgentHost implements NanoclawAgentHost {
+export class NanoclawXmppAgentHost implements XmppAgentHost {
   getAgent(orchestratorId: string): NanoclawAgentRecord | undefined {
     const row = getOrchestratorAgent(orchestratorId);
     return row ? toRecord(row) : undefined;

@@ -45,8 +45,8 @@ export interface NanoclawAgentRecord {
   createdAt: string;
 }
 
-/** NanoClaw operations required by the transport-agnostic orchestrator. */
-export interface NanoclawAgentHost {
+/** NanoClaw runtime and XMPP binding operations required by this orchestrator. */
+export interface XmppAgentHost {
   provisionAgent(request: NanoclawAgentProvision): Promise<NanoclawAgentProvisionResult>;
   deleteAgent(orchestratorId: string): Promise<void>;
   getAgent(orchestratorId: string): NanoclawAgentRecord | undefined;

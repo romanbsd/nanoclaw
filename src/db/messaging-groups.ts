@@ -221,11 +221,11 @@ export function ensureAgentDestinationForWiring(mga: MessagingGroupAgent): void 
   // delivery is also skipped (same guard), so channel sends still work.
   if (!hasTable(getDb(), 'agent_destinations')) return;
 
-  const mg = getMessagingGroup(mga.messaging_group_id);
-  if (!mg) return;
-
   const existing = getDestinationByTarget(mga.agent_group_id, 'channel', mga.messaging_group_id);
   if (existing) return;
+
+  const mg = getMessagingGroup(mga.messaging_group_id);
+  if (!mg) return;
 
   const base = normalizeName(mg.name || `${mg.channel_type}-${mga.messaging_group_id.slice(0, 8)}`);
   let localName = base;

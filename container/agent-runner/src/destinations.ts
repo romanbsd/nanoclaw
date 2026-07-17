@@ -69,9 +69,9 @@ export function findByRouting(
   const db = getInboundDb();
   const row =
     channelType === 'agent'
-      ? (db.prepare("SELECT * FROM destinations WHERE type = 'agent' AND agent_group_id = ?").get(platformId) as
-          | DestRow
-          | undefined)
+      ? (db
+          .prepare("SELECT * FROM destinations WHERE type = 'agent' AND agent_group_id = ?")
+          .get(platformId) as DestRow | undefined)
       : (db
           .prepare(
             `SELECT * FROM destinations
@@ -93,13 +93,7 @@ export function buildSystemPromptAddendum(assistantName?: string, mode: SessionM
   const sections: string[] = [];
 
   if (assistantName) {
-    sections.push(
-      [
-        '# You are ' + assistantName,
-        '',
-        `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`,
-      ].join('\n'),
-    );
+    sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
   }
 
   sections.push(buildDestinationsSection(mode));
@@ -113,6 +107,7 @@ export function buildSystemPromptAddendum(assistantName?: string, mode: SessionM
 function buildDestinationsSection(mode: SessionMode): string {
   const all = getAllDestinations();
   const lines = ['## Sending messages', ''];
+
   if (all.length === 0) {
     lines.push('You currently have no configured human destinations.');
   } else if (all.length === 1) {
@@ -124,6 +119,7 @@ function buildDestinationsSection(mode: SessionMode): string {
       lines.push(`- \`${d.name}\`${destinationLabel(d)}`);
     }
   }
+
   lines.push('');
 
   if (mode.kind === 'task') {
@@ -139,8 +135,6 @@ function buildDestinationsSection(mode: SessionMode): string {
     lines.push(
       'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
     );
-  }
-  if (all.length > 0) {
     lines.push('');
     lines.push(
       'When replying to an incoming message, default to addressing the destination it came `from` (every inbound `<message>` tag carries a `from="name"` attribute). Pick a different destination when the request asks for it (e.g., "tell Laura that…").',

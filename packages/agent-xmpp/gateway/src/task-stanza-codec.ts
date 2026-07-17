@@ -8,7 +8,12 @@
  *
  * @see https://xmpp.org/extensions/xep-0359.html
  */
-import { DEFAULT_PROTOCOL_NAMESPACES, type AgentTaskRecord, type AgentXmppNamespaces } from '@agent-xmpp/protocol';
+import {
+  DEFAULT_PROTOCOL_NAMESPACES,
+  bareJid,
+  type AgentTaskRecord,
+  type AgentXmppNamespaces,
+} from '@agent-xmpp/protocol';
 import { xml, type Element } from '@xmpp/xml';
 
 export interface ParsedTaskInvocation {
@@ -94,7 +99,7 @@ export function parseTaskInvocation(
     inputSchemaDigest: String(invoke.attrs['input-schema-digest'] ?? ''),
     outputSchemaDigest: invoke.attrs['output-schema-digest'] ? String(invoke.attrs['output-schema-digest']) : undefined,
     callerJid: String(caller?.attrs.jid ?? stanza.attrs.from ?? ''),
-    toJid: String(stanza.attrs.to ?? '').split('/')[0],
+    toJid: bareJid(String(stanza.attrs.to ?? '')),
     tenantId: String(context?.attrs['tenant-id'] ?? 'default'),
     workspaceId: context?.attrs['workspace-id'] ? String(context.attrs['workspace-id']) : undefined,
     arguments: args,

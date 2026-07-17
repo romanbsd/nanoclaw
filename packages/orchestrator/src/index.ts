@@ -4,7 +4,7 @@ export { provisionNanoclawAgent } from './provision-nanoclaw-agent.js';
 export type { ProvisionNanoclawAgentRequest, ProvisionNanoclawAgentResult } from './provision-nanoclaw-agent.js';
 export type {
   McpServerSpec,
-  NanoclawAgentHost,
+  XmppAgentHost,
   NanoclawAgentProvision,
   NanoclawAgentProvisionResult,
   NanoclawAgentRecord,

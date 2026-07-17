@@ -73,6 +73,20 @@ function tool(
 
 const endpointId = { type: 'string' as const, description: 'Canonical xmpp+mcp:// endpoint ID' };
 const taskId = { type: 'string' as const };
+const startToolInputSchema = {
+  type: 'object' as const,
+  properties: {
+    endpointId,
+    tool: { type: 'string' as const },
+    arguments: { type: 'object' as const },
+    apiVersion: { type: 'string' as const },
+    timeoutSeconds: { type: 'integer' as const, minimum: 1 },
+    idempotencyKey: { type: 'string' as const },
+    parentTaskId: { type: 'string' as const },
+  },
+  required: ['endpointId', 'tool', 'arguments'],
+  additionalProperties: false,
+};
 
 export const xmppAgentGatewayTools: McpToolDefinition[] = [
   tool('agent_api.register', 'Register this agent MCP-compatible API manifest.', {
@@ -99,37 +113,11 @@ export const xmppAgentGatewayTools: McpToolDefinition[] = [
     required: ['endpointId'],
     additionalProperties: false,
   }),
-  tool('agents.start_tool', 'Start a durable remote-agent operation and return its task handle.', {
-    type: 'object',
-    properties: {
-      endpointId,
-      tool: { type: 'string' },
-      arguments: { type: 'object' },
-      apiVersion: { type: 'string' },
-      timeoutSeconds: { type: 'integer', minimum: 1 },
-      idempotencyKey: { type: 'string' },
-      parentTaskId: { type: 'string' },
-    },
-    required: ['endpointId', 'tool', 'arguments'],
-    additionalProperties: false,
-  }),
+  tool('agents.start_tool', 'Start a durable remote-agent operation and return its task handle.', startToolInputSchema),
   tool(
     'agents.call_tool',
     'Invoke a durable remote-agent operation and wait for its structured result.',
-    {
-      type: 'object',
-      properties: {
-        endpointId,
-        tool: { type: 'string' },
-        arguments: { type: 'object' },
-        apiVersion: { type: 'string' },
-        timeoutSeconds: { type: 'integer', minimum: 1 },
-        idempotencyKey: { type: 'string' },
-        parentTaskId: { type: 'string' },
-      },
-      required: ['endpointId', 'tool', 'arguments'],
-      additionalProperties: false,
-    },
+    startToolInputSchema,
     'agents.call_tool',
     (args) => ((args.timeoutSeconds as number | undefined) ?? 600) * 1000,
   ),

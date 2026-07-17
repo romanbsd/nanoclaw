@@ -227,6 +227,18 @@ export class XmppAgentGatewayStore {
     return this.getTask(taskId)!;
   }
 
+  /** Persist a lifecycle event and its resulting task state atomically. */
+  applyEvent(event: AgentTaskEvent, state?: AgentTaskState, patch: Partial<AgentTaskRecord> = {}): AgentTaskRecord {
+    const db = getDb();
+    return db.transaction(() => {
+      this.appendEvent(event);
+      if (state) return this.transition(event.taskId, state, patch);
+      const task = this.getTask(event.taskId);
+      if (!task) throw new Error(`unknown task: ${event.taskId}`);
+      return task;
+    })();
+  }
+
   appendEvent(event: AgentTaskEvent): void {
     // ponytail: MAX(sequence)+1 then INSERT is not atomic — safe only because the
     // host is the single writer of this DB. Add a per-task lock if that ever changes.

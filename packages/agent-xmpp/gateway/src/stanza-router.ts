@@ -65,7 +65,7 @@ export class StanzaRouter {
     }
     if (stanza.name !== 'message') return;
 
-    const toBare = (stanza.attrs.to as string)?.split('/')[0] || '';
+    const toBare = bareJid(String(stanza.attrs.to ?? ''));
     // Stanzas arrive on the component JID; resolve which registered agent they target.
     const agentJid = resolveTargetAgentJid(toBare, this.config.agentDomain, this.config.defaultAgentJid);
 

@@ -32,6 +32,21 @@ export function getOrchestratorAgentByGroupId(agentGroupId: string): Orchestrato
     | undefined;
 }
 
+/** Parse persisted spawn environment, rejecting malformed or non-string values. */
+export function parseOrchestratorSpawnEnv(raw: string | null | undefined): Record<string, string> | null {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const entries = Object.entries(parsed);
+    if (entries.some(([, value]) => typeof value !== 'string')) return null;
+    return Object.fromEntries(entries) as Record<string, string>;
+    // eslint-disable-next-line no-catch-all/no-catch-all -- persisted legacy rows may be malformed
+  } catch {
+    return null;
+  }
+}
+
 export function getOrchestratorAgentByXmppJid(jid: string): OrchestratorAgent | undefined {
   return getDb()
     .prepare(

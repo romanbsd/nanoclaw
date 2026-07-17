@@ -1,15 +1,12 @@
 import { OpenfireClient, loadOpenfireConfigFromEnv, usernameFromJid } from './openfire-client.js';
-import type { NanoclawAgentHost } from './nanoclaw-host.js';
+import type { XmppAgentHost } from './nanoclaw-host.js';
 
 export interface DeleteNanoclawAgentOptions {
-  host: NanoclawAgentHost;
+  host: XmppAgentHost;
   openfireClient?: OpenfireClient;
 }
 
-export async function deleteNanoclawAgent(
-  orchestratorId: string,
-  options: DeleteNanoclawAgentOptions,
-): Promise<void> {
+export async function deleteNanoclawAgent(orchestratorId: string, options: DeleteNanoclawAgentOptions): Promise<void> {
   const record = options.host.getAgent(orchestratorId);
   if (!record) {
     throw new Error(`Orchestrator agent not found: ${orchestratorId}`);

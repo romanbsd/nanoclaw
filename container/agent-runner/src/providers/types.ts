@@ -8,8 +8,12 @@ export interface AgentProvider {
    */
   readonly supportsNativeSlashCommands: boolean;
 
-  /** Register shared memory through the provider's native session-start mechanism. */
-  registerMemorySessionHook(hook: MemorySessionHookRegistration): void;
+  /**
+   * Register shared memory through the provider's native session-start mechanism.
+   * Providers without a native lifecycle hook receive memory through the regular
+   * system context and may omit this capability.
+   */
+  registerMemorySessionHook?(hook: MemorySessionHookRegistration): void;
 
   /**
    * Optional. Called by the poll-loop after each completed exchange (a

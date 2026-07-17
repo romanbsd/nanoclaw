@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { closeDb, getDb, initTestDb, runMigrations } from '../../db/index.js';
 import { digestJson, validateJson, validateManifest } from './schema.js';
+import { XmppAgentGatewayService } from './service.js';
 import { XmppAgentGatewayStore } from './store.js';
 import { createProtocolNamespaces } from '@agent-xmpp/protocol';
 
@@ -79,6 +80,93 @@ describe('XMPP agent gateway store', () => {
     expect(store.takeTaskWaiters('task-1')).toEqual([]);
     expect(store.transition('task-1', 'completed', { result: { summary: 'ok' } }).state).toBe('completed');
     expect(() => store.transition('task-1', 'failed')).toThrow(/terminal/);
+  });
+
+  it('persists lifecycle events and state transitions atomically', () => {
+    const store = new XmppAgentGatewayStore();
+    const operation = store.registerManifest(manifest, 'acme').operations[0]!;
+    const now = new Date().toISOString();
+    store.createTask({
+      taskId: 'task-atomic',
+      rootTaskId: 'task-atomic',
+      callerJid: 'caller@agents.test',
+      targetJid: manifest.agent.jid,
+      tenantId: 'acme',
+      endpointId: `xmpp+mcp://${manifest.agent.jid}`,
+      operation: operation.name,
+      apiVersion: manifest.agent.version,
+      inputSchemaDigest: operation.inputSchemaDigest,
+      outputSchemaDigest: operation.outputSchemaDigest,
+      arguments: { branch: 'main' },
+      state: 'running',
+      attempt: 1,
+      correlationId: 'request-atomic',
+      createdAt: now,
+      acceptedAt: now,
+      startedAt: now,
+    });
+
+    const completed = store.applyEvent(
+      { type: 'completed', taskId: 'task-atomic', result: { summary: 'ok' } },
+      'completed',
+      { result: { summary: 'ok' } },
+    );
+    expect(completed).toMatchObject({ state: 'completed', result: { summary: 'ok' } });
+    expect(getDb().prepare('SELECT type FROM xmpp_agent_task_events WHERE task_id = ?').all('task-atomic')).toEqual([
+      { type: 'completed' },
+    ]);
+
+    expect(() =>
+      store.applyEvent(
+        {
+          type: 'failed',
+          taskId: 'task-atomic',
+          error: { code: 'late', message: 'too late', retryable: false },
+        },
+        'failed',
+      ),
+    ).toThrow(/terminal/);
+    expect(getDb().prepare('SELECT type FROM xmpp_agent_task_events WHERE task_id = ?').all('task-atomic')).toEqual([
+      { type: 'completed' },
+    ]);
+  });
+
+  it('records remote terminal events through the shared lifecycle path', async () => {
+    const store = new XmppAgentGatewayStore();
+    const operation = store.registerManifest(manifest, 'acme').operations[0]!;
+    const now = new Date().toISOString();
+    store.createTask({
+      taskId: 'task-remote',
+      rootTaskId: 'task-remote',
+      callerJid: 'caller@agents.test',
+      targetJid: manifest.agent.jid,
+      tenantId: 'acme',
+      endpointId: `xmpp+mcp://${manifest.agent.jid}`,
+      operation: operation.name,
+      apiVersion: manifest.agent.version,
+      inputSchemaDigest: operation.inputSchemaDigest,
+      outputSchemaDigest: operation.outputSchemaDigest,
+      arguments: { branch: 'main' },
+      state: 'running',
+      attempt: 1,
+      correlationId: 'request-remote',
+      createdAt: now,
+      acceptedAt: now,
+      startedAt: now,
+    });
+
+    await new XmppAgentGatewayService(store).acceptRemoteEvent({
+      taskId: 'task-remote',
+      type: 'completed',
+      from: `${manifest.agent.jid}/worker`,
+      to: 'caller@agents.test',
+      payload: { result: { summary: 'remote ok' } },
+    });
+
+    expect(store.getTask('task-remote')).toMatchObject({ state: 'completed', result: { summary: 'remote ok' } });
+    expect(getDb().prepare('SELECT type FROM xmpp_agent_task_events WHERE task_id = ?').all('task-remote')).toEqual([
+      { type: 'completed' },
+    ]);
   });
 
   it('validates manifests and discovery descriptors against an injected profile', () => {

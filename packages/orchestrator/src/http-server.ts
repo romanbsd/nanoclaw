@@ -3,11 +3,11 @@ import Fastify from 'fastify';
 import { deleteNanoclawAgent } from './delete-agent.js';
 import { provisionNanoclawAgent, type ProvisionNanoclawAgentRequest } from './provision-nanoclaw-agent.js';
 import type { OpenfireClient } from './openfire-client.js';
-import type { NanoclawAgentHost } from './nanoclaw-host.js';
+import type { XmppAgentHost } from './nanoclaw-host.js';
 import type { AgentXmppNamespaces } from '@agent-xmpp/protocol';
 
 export interface OrchestratorServerOptions {
-  nanoclawHost: NanoclawAgentHost;
+  nanoclawHost: XmppAgentHost;
   port?: number;
   host?: string;
   apiSecret?: string;

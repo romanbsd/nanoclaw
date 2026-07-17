@@ -4,7 +4,7 @@ import fs from 'fs';
 import { initTestDb, closeDb, getDb, runMigrations, createAgentGroup } from '../db/index.js';
 import { createSession } from '../db/sessions.js';
 import type { Session } from '../types.js';
-import { initSessionFolder, openInboundDb } from '../session-manager.js';
+import { initSessionFolder, openInboundDb, writeSessionRouting } from '../session-manager.js';
 import { deliverAgentInbound } from './index.js';
 
 vi.mock('../container-runner.js', () => ({
@@ -143,6 +143,57 @@ describe('deliverAgentInbound', () => {
       expect(routing.platform_id).toBe('john@example.org');
     } finally {
       db.close();
+    }
+  });
+
+  it('does not overwrite an authoritative existing route during wake seeding', async () => {
+    createAgentGroup({
+      id: 'ag-routing',
+      name: 'Routing',
+      folder: 'routing',
+      agent_provider: null,
+      created_at: new Date().toISOString(),
+    });
+    const { createMessagingGroup } = await import('../db/messaging-groups.js');
+    createMessagingGroup({
+      id: 'mg-routing',
+      channel_type: 'xmpp',
+      platform_id: 'configured@example.org',
+      instance: 'xmpp',
+      name: 'Configured',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: new Date().toISOString(),
+    });
+    createSession({
+      id: 'sess-routing',
+      agent_group_id: 'ag-routing',
+      messaging_group_id: 'mg-routing',
+      thread_id: null,
+      agent_provider: null,
+      status: 'active',
+      container_status: 'idle',
+      last_active: null,
+      created_at: new Date().toISOString(),
+    });
+    initSessionFolder('ag-routing', 'sess-routing');
+
+    const db = openInboundDb('ag-routing', 'sess-routing');
+    db.prepare(
+      `INSERT INTO session_routing (id, channel_type, platform_id, thread_id)
+       VALUES (1, 'xmpp', 'actual-peer@example.org', NULL)`,
+    ).run();
+    db.close();
+
+    writeSessionRouting('ag-routing', 'sess-routing');
+
+    const check = openInboundDb('ag-routing', 'sess-routing');
+    try {
+      expect(check.prepare('SELECT platform_id FROM session_routing WHERE id = 1').get()).toEqual({
+        platform_id: 'actual-peer@example.org',
+      });
+    } finally {
+      check.close();
     }
   });
 });

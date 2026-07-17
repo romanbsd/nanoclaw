@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { InboundMessage } from './agent-message.js';
 import { createProtocolNamespaces, DEFAULT_PROTOCOL_NAMESPACES, DEFAULT_PROTOCOL_PROFILE } from './namespaces.js';
+import { bareJid } from './jid.js';
 
 describe('protocol profile', () => {
+  it('normalizes resource-qualified JIDs at the shared protocol boundary', () => {
+    expect(bareJid('agent@example.org/worker')).toBe('agent@example.org');
+    expect(bareJid('agent@example.org')).toBe('agent@example.org');
+  });
+
   it('uses Solstice identifiers by default', () => {
     expect(DEFAULT_PROTOCOL_PROFILE).toEqual({ namespaceRoot: 'urn:solstice', mediaVendor: 'solstice' });
     expect(DEFAULT_PROTOCOL_NAMESPACES.api).toBe('urn:solstice:agent-api:1');

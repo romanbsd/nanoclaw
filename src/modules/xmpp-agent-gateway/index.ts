@@ -27,13 +27,13 @@ const actions: GatewayMailboxRequest['action'][] = [
 for (const action of actions) {
   registerDeliveryAction(
     action,
-    async (content, session, inDb) => {
+    async (content, session) => {
       const request: GatewayMailboxRequest = {
         requestId: String(content.requestId ?? ''),
         action,
         payload: (content.payload ?? {}) as Record<string, unknown>,
       };
-      await service.handle(request, session, inDb);
+      await service.handle(request, session);
     },
     unguarded('XMPP gateway service validates caller identity, schemas, authorization, and task state'),
   );

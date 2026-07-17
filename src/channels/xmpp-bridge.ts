@@ -2,6 +2,7 @@
 import { EmbeddedXmppGateway, loadConfig, type GatewayRuntimeMailbox } from '@agent-xmpp/gateway';
 import {
   agentMessageFromNanoclawContent,
+  bareJid,
   isBridgeFormResponsePayload,
   isXmppAgentEnvelope,
   nanoclawInboundFromBridge,
@@ -12,6 +13,7 @@ import {
 import { getAskQuestionRender } from '../db/sessions.js';
 import { log } from '../log.js';
 import '../modules/xmpp-agent-gateway/index.js';
+import { getXmppContainerContribution } from '../modules/xmpp-agent-gateway/container-contribution.js';
 import { XmppAgentGatewayStore } from '../modules/xmpp-agent-gateway/store.js';
 import { XmppAgentGatewayService } from '../modules/xmpp-agent-gateway/service.js';
 import { getOrchestratorAgentByGroupId } from '../modules/xmpp-agent-gateway/orchestrator-store.js';
@@ -21,9 +23,6 @@ import { resolveAskQuestionSelection } from './ask-question.js';
 import type { ChannelAdapter, ChannelSetup, OutboundMessage } from './adapter.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import { createXmppAgentIqHandler } from './xmpp-agent-iq.js';
-
-const XMPP_AGENT_PROMPT_ADDENDUM =
-  "**Destinations name human chat peers only.** Other NanoClaw agents are remote MCP endpoints. Use `agents.discover_endpoints` with the agent name or JID, then `agents.call_tool` with the returned endpoint and its `conversation.respond` operation when you need that agent's answer in this turn. Return the remote result to the requesting human; do not stop after merely saying you will look it up.";
 
 function createAdapter(): ChannelAdapter | null {
   if (!process.env.XMPP_COMPONENT_JID || !process.env.XMPP_COMPONENT_SECRET) return null;
@@ -35,7 +34,7 @@ function createAdapter(): ChannelAdapter | null {
   const taskService = new XmppAgentGatewayService(store);
 
   function tenantForSender(sender: string): string {
-    const group = getAgentGroupByXmppJid(sender.split('/')[0] ?? sender);
+    const group = getAgentGroupByXmppJid(bareJid(sender));
     return group ? (getOrchestratorAgentByGroupId(group.id)?.tenant_id ?? 'default') : 'default';
   }
 
@@ -197,35 +196,6 @@ function createAdapter(): ChannelAdapter | null {
 
 registerChannelAdapter('xmpp', {
   factory: createAdapter,
-  normalizePlatformId: (platformId) => platformId.split('/')[0] ?? platformId,
-  containerConfig({ agentGroupId }) {
-    const identity = getXmppAgentIdentity(agentGroupId);
-    const orchestratorAgent = getOrchestratorAgentByGroupId(agentGroupId);
-    if (!orchestratorAgent) {
-      return identity
-        ? { env: { XMPP_AGENT_JID: identity.jid }, promptAddendum: XMPP_AGENT_PROMPT_ADDENDUM }
-        : undefined;
-    }
-
-    let spawnEnv: Record<string, string>;
-    try {
-      spawnEnv = JSON.parse(orchestratorAgent.spawn_env) as Record<string, string>;
-    } catch (err) {
-      log.warn('Ignoring malformed orchestrator spawn_env', { agentGroupId, err });
-      return identity
-        ? { env: { XMPP_AGENT_JID: identity.jid }, promptAddendum: XMPP_AGENT_PROMPT_ADDENDUM }
-        : undefined;
-    }
-
-    const blockedHosts =
-      spawnEnv.BLOCKED_HOSTS?.split(',')
-        .map((host) => host.trim())
-        .filter(Boolean) ?? [];
-    const env = Object.fromEntries(Object.entries(spawnEnv).filter(([key, value]) => key !== 'BLOCKED_HOSTS' && value));
-    return {
-      env,
-      blockedHosts,
-      ...(identity ? { promptAddendum: XMPP_AGENT_PROMPT_ADDENDUM } : {}),
-    };
-  },
+  normalizePlatformId: bareJid,
+  containerConfig: ({ agentGroupId }) => getXmppContainerContribution(agentGroupId),
 });

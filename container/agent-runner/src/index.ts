@@ -105,7 +105,7 @@ async function main(): Promise<void> {
     model: config.model,
     effort: config.effort,
   });
-  provider.registerMemorySessionHook(MEMORY_SESSION_HOOK);
+  provider.registerMemorySessionHook?.(MEMORY_SESSION_HOOK);
 
   await runPollLoop({
     provider,

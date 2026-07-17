@@ -1,11 +1,11 @@
 # XMPP Agent Gateway Specification
 
-**Status:** Draft Architecture and Protocol Specification  
-**Version:** 0.1.0  
-**Date:** 2026-07-12  
-**Intended implementation language:** TypeScript  
-**Primary XMPP server:** Openfire  
-**Container/runtime management:** External dependency; assumed to exist  
+**Status:** Draft Architecture and Protocol Specification
+**Version:** 0.1.0
+**Date:** 2026-07-12
+**Intended implementation language:** TypeScript
+**Primary XMPP server:** Openfire
+**Container/runtime management:** External dependency; assumed to exist
 **Normative keywords:** The terms **MUST**, **MUST NOT**, **REQUIRED**, **SHOULD**, **SHOULD NOT**, and **MAY** are to be interpreted as described in RFC 2119 and RFC 8174.
 
 ---
