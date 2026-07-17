@@ -262,19 +262,19 @@ export async function requestChannelApproval(input: RequestChannelApprovalInput)
   }
 
   try {
-    await adapter.deliver(
-      delivery.messagingGroup.channel_type,
-      delivery.messagingGroup.platform_id,
-      null,
-      'chat-sdk',
-      JSON.stringify({
+    await adapter.deliver({
+      channelType: delivery.messagingGroup.channel_type,
+      platformId: delivery.messagingGroup.platform_id,
+      threadId: null,
+      kind: 'chat-sdk',
+      content: JSON.stringify({
         type: 'ask_question',
         questionId: messagingGroupId,
         title,
         question,
         options,
       }),
-    );
+    });
     log.info('Channel registration card delivered', {
       messagingGroupId,
       agentGroupCount: agentGroups.length,

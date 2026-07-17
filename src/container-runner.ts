@@ -25,6 +25,8 @@ import {
 import { materializeContainerJson } from './container-config.js';
 import { getContainerConfig } from './db/container-configs.js';
 import { updateContainerConfigScalars } from './db/container-configs.js';
+import { getChannelContainerContributions } from './channels/channel-registry.js';
+import { combineContainerContributions, type ContainerContribution } from './container-contribution.js';
 import { CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { EGRESS_NETWORK, egressNetworkArgs, ensureEgressNetwork } from './egress-lockdown.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
@@ -142,8 +144,10 @@ async function spawnContainer(session: Session): Promise<void> {
   // (extra mounts, env passthrough). Computed once and threaded through both
   // buildMounts and buildContainerArgs so side effects (mkdir, etc.) fire once.
   const { provider, contribution } = resolveProviderContribution(session, agentGroup, containerConfig);
+  const channelContributions = getChannelContainerContributions(agentGroup.id);
+  const containerContribution = combineContainerContributions(contribution, channelContributions);
 
-  const mounts = buildMounts(agentGroup, session, containerConfig, provider, contribution);
+  const mounts = buildMounts(agentGroup, session, containerConfig, provider, containerContribution);
   const containerName = `nanoclaw-v2-${agentGroup.folder}-${Date.now()}`;
   // OneCLI agent identifier is always the agent group id — stable across
   // sessions and reversible via getAgentGroup() for approval routing.
@@ -154,7 +158,7 @@ async function spawnContainer(session: Session): Promise<void> {
     agentGroup,
     containerConfig,
     provider,
-    contribution,
+    containerContribution,
     agentIdentifier,
   );
 
@@ -269,7 +273,7 @@ export function buildMounts(
   session: Session,
   containerConfig: import('./container-config.js').ContainerConfig,
   provider: string,
-  providerContribution: ProviderContainerContribution,
+  contribution: ContainerContribution,
 ): VolumeMount[] {
   const projectRoot = process.cwd();
 
@@ -350,9 +354,8 @@ export function buildMounts(
     mounts.push(...validated);
   }
 
-  // Provider-contributed mounts (e.g. opencode-xdg)
-  if (providerContribution.mounts) {
-    mounts.push(...providerContribution.mounts);
+  if (contribution.mounts) {
+    mounts.push(...contribution.mounts);
   }
 
   return mounts;
@@ -431,13 +434,26 @@ function selectedSkillNames(containerConfig: import('./container-config.js').Con
     : [];
 }
 
+/** Apply the resolved provider/channel contribution after OneCLI. */
+function applyContainerContribution(args: string[], contribution: ContainerContribution): void {
+  for (const host of contribution.blockedHosts ?? []) {
+    args.push('--add-host', `${host}:0.0.0.0`);
+  }
+  for (const [key, value] of Object.entries(contribution.env ?? {})) {
+    if (value) args.push('-e', `${key}=${value}`);
+  }
+  if (contribution.promptAddendum) {
+    args.push('-e', `NANOCLAW_SYSTEM_PROMPT_ADDENDUM=${contribution.promptAddendum}`);
+  }
+}
+
 async function buildContainerArgs(
   mounts: VolumeMount[],
   containerName: string,
   agentGroup: AgentGroup,
   containerConfig: import('./container-config.js').ContainerConfig,
   _provider: string,
-  providerContribution: ProviderContainerContribution,
+  contribution: ContainerContribution,
   agentIdentifier?: string,
 ): Promise<string[]> {
   const args: string[] = ['run', '--rm', '--name', containerName, '--label', CONTAINER_INSTALL_LABEL];
@@ -452,13 +468,6 @@ async function buildContainerArgs(
   // Environment — only vars read by code we don't own.
   // Everything NanoClaw-specific is in container.json (read by runner at startup).
   args.push('-e', `TZ=${TIMEZONE}`);
-
-  // Provider-contributed env vars (e.g. XDG_DATA_HOME, OPENCODE_*, NO_PROXY).
-  if (providerContribution.env) {
-    for (const [key, value] of Object.entries(providerContribution.env)) {
-      args.push('-e', `${key}=${value}`);
-    }
-  }
 
   // Egress lockdown when enabled — throws if it can't be established, aborting
   // the spawn rather than running with open egress. Otherwise the host gateway.
@@ -503,6 +512,10 @@ async function buildContainerArgs(
     throw new Error('OneCLI gateway not applied — refusing to spawn container without credentials');
   }
   log.info('OneCLI gateway applied', { containerName });
+
+  // Apply explicit provider/channel values after OneCLI so local-model and
+  // NO_PROXY overrides win over gateway defaults.
+  applyContainerContribution(args, contribution);
 
   // Override entrypoint: run v2 entry point directly via Bun (no tsc, no stdin).
   args.push('--entrypoint', 'bash');

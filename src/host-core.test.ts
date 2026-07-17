@@ -426,6 +426,38 @@ describe('router', () => {
     expect(wakeContainer).toHaveBeenCalled();
   });
 
+  it('routes by conversation address while preserving the sender reply address', async () => {
+    const { routeInbound } = await import('./router.js');
+
+    await routeInbound({
+      channelType: 'discord',
+      conversationPlatformId: 'chan-123',
+      platformId: 'remote-peer',
+      threadId: null,
+      message: {
+        id: 'msg-targeted',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'Peer', text: 'Direct work' }),
+        timestamp: now(),
+        isMention: true,
+      },
+    });
+
+    const session = findSession('mg-1', null);
+    expect(session).toBeDefined();
+    const db = new Database(inboundDbPath('ag-1', session!.id));
+    const row = db.prepare('SELECT platform_id, channel_type, content FROM messages_in').get() as {
+      platform_id: string;
+      channel_type: string;
+      content: string;
+    };
+    db.close();
+
+    expect(row.platform_id).toBe('remote-peer');
+    expect(row.channel_type).toBe('discord');
+    expect(JSON.parse(row.content).text).toBe('Direct work');
+  });
+
   it('auto-creates messaging group only when the bot is addressed (mention/DM)', async () => {
     // The router's no-mg branch is escalation-gated: plain chatter on an
     // unknown channel stays silent (no DB writes) so a bot that sits in
@@ -899,6 +931,33 @@ describe('router — per-wiring thread policy', () => {
     });
   });
 
+  it('wiring threads=0 also sends typing at the effective top-level address', async () => {
+    getDb().prepare("UPDATE messaging_group_agents SET threads = 0 WHERE id = 'mga-tp'").run();
+    const { setTypingAdapter } = await import('./modules/typing/index.js');
+    const calls: Array<{ channelType: string; platformId: string; threadId: string | null; instance?: string }> = [];
+    setTypingAdapter({
+      async setTyping(channelType, platformId, threadId, instance) {
+        calls.push({ channelType, platformId, threadId, instance });
+      },
+    });
+
+    try {
+      await withThreadedAdapter(async () => {
+        const { routeInbound } = await import('./router.js');
+        await routeInbound(threadedEvent('msg-typing-opt-out'));
+      });
+    } finally {
+      setTypingAdapter({ async setTyping() {} });
+    }
+
+    expect(calls[0]).toEqual({
+      channelType: 'tp-slack',
+      platformId: 'tp:C1',
+      threadId: null,
+      instance: 'tp-slack',
+    });
+  });
+
   it('wiring threads=0 never strips replyTo (operator intent)', async () => {
     getDb().prepare("UPDATE messaging_group_agents SET threads = 0 WHERE id = 'mga-tp'").run();
 
@@ -1144,6 +1203,51 @@ describe('writeSessionRouting', () => {
     expect(row!.thread_id).toBeNull();
   });
 
+  it('preserves the latest inbound reply address when routing is refreshed', () => {
+    createAgentGroup({
+      id: 'ag-1',
+      name: 'Agent',
+      folder: 'agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-1',
+      channel_type: 'xmpp',
+      platform_id: 'agent@example.org',
+      instance: 'xmpp',
+      name: 'Agent inbox',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    writeSessionMessage('ag-1', session.id, {
+      id: 'msg-peer',
+      kind: 'chat',
+      timestamp: now(),
+      platformId: 'peer@example.org',
+      channelType: 'xmpp',
+      threadId: 'peer-thread',
+      content: JSON.stringify({ text: 'hello' }),
+    });
+
+    // Container startup refreshes routing. It must not replace the actual
+    // sender with the messaging group's receiving inbox address.
+    writeSessionRouting('ag-1', session.id);
+
+    const db = new Database(inboundDbPath('ag-1', session.id));
+    const row = db.prepare('SELECT channel_type, platform_id, thread_id FROM session_routing WHERE id = 1').get() as {
+      channel_type: string;
+      platform_id: string;
+      thread_id: string | null;
+    };
+    db.close();
+
+    expect(row).toEqual({ channel_type: 'xmpp', platform_id: 'peer@example.org', thread_id: 'peer-thread' });
+  });
+
   it('writes null routing for agent-shared session (no messaging group)', () => {
     createAgentGroup({
       id: 'ag-1',
@@ -1360,9 +1464,9 @@ describe('agent-to-agent routing', () => {
     expect(discordA2a).toHaveLength(0);
   });
 
-  it('BUG: A2A-only session gets null session_routing (#2332)', async () => {
-    // Researcher only has an agent-shared session (no channel wiring).
-    // writeSessionRouting writes nulls because messaging_group_id is null.
+  it('A2A-only session keeps the latest agent return route (#2332)', async () => {
+    // Researcher only has an agent-shared session (no channel wiring), so
+    // its latest addressed inbound is the only truthful return route.
     const { routeAgentMessage } = await import('./modules/agent-to-agent/agent-route.js');
 
     const { session: paSession } = resolveSession('ag-pa', 'mg-slack', null, 'shared');
@@ -1386,10 +1490,9 @@ describe('agent-to-agent routing', () => {
       | undefined;
     rDb.close();
 
-    // BUG: session_routing is all null — researcher has no default routing
     expect(routing).toBeDefined();
-    expect(routing!.channel_type).toBeNull();
-    expect(routing!.platform_id).toBeNull();
+    expect(routing!.channel_type).toBe('agent');
+    expect(routing!.platform_id).toBe('ag-pa');
   });
 });
 

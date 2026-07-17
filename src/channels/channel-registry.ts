@@ -4,7 +4,15 @@
  * Channels self-register on import. The host calls initChannelAdapters() at startup
  * to instantiate and set up all registered adapters.
  */
-import type { ChannelAdapter, ChannelDefaults, ChannelRegistration, ChannelSetup, OutboundFile } from './adapter.js';
+import {
+  type ChannelAdapter,
+  type ChannelContainerContribution,
+  type ChannelDefaults,
+  type ChannelRegistration,
+  type ChannelSetup,
+  type OutboundFile,
+} from './adapter.js';
+import { ChannelUnavailableError } from './errors.js';
 import type { ChannelDeliveryAdapter } from '../delivery.js';
 import { log } from '../log.js';
 
@@ -62,62 +70,58 @@ export function getChannelAdapter(key: string): ChannelAdapter | undefined {
   return undefined;
 }
 
-/** Thrown by the delivery bridge when the exact adapter for an outbound
- *  message is not registered (credentials missing so the factory returned
- *  null, setup failed, or a named instance is offline). Deliberately a throw
- *  rather than an `undefined` return: `undefined` is also what a successful
- *  adapter with no platform message id resolves to, and a normal return makes
- *  `drainSession` mark the row delivered even though nothing was sent (#2995).
- *  Throwing routes the message into the delivery retry path, where it ends as
- *  `status='failed'` if the adapter never comes back. */
-export class MissingChannelAdapterError extends Error {
-  constructor(
-    readonly channelType: string,
-    readonly instance?: string,
-  ) {
-    super(
-      `No adapter registered for '${instance ?? channelType}' — message enters the delivery retry path. ` +
-        `Check the startup log for why this channel's adapter did not start.`,
-    );
-    this.name = 'MissingChannelAdapterError';
-  }
-}
-
 /**
  * Build the host's outbound delivery bridge: dispatches delivery-poll and
  * typing traffic into the adapter registry. Resolution is EXACT-key only —
  * `instance ?? channelType`. For default-instance messaging_groups rows the
  * stored instance IS the channelType, which matches default-registered
  * adapters, so single-instance behavior is unchanged. A named instance whose
- * adapter is offline gets the normal offline-adapter handling
- * (MissingChannelAdapterError → the delivery retry path) — never a
- * cross-identity send through a sibling bot of the same platform.
+ * adapter is offline leaves the outbound row pending without consuming its
+ * send-failure retry budget — never a cross-identity send through a sibling
+ * bot of the same platform.
  */
 export function createChannelDeliveryAdapter(): ChannelDeliveryAdapter {
   return {
-    async deliver(
-      channelType: string,
-      platformId: string,
-      threadId: string | null,
-      kind: string,
-      content: string,
-      files?: OutboundFile[],
-      instance?: string,
-    ): Promise<string | undefined> {
-      const adapter = getChannelAdapterExact(instance ?? channelType);
-      if (!adapter) {
-        throw new MissingChannelAdapterError(channelType, instance);
+    async deliver(request): Promise<string | undefined> {
+      const { channelType, platformId, threadId, kind, content, files, instance, senderIdentity, agentGroupId } =
+        request;
+      const adapterKey = instance ?? channelType;
+      const adapter = getChannelAdapterExact(adapterKey);
+      if (!adapter || !adapter.isConnected()) {
+        throw new ChannelUnavailableError(channelType, adapterKey);
       }
-      return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content), files });
+      const resolvedIdentity =
+        senderIdentity ?? (agentGroupId ? adapter.resolveSenderIdentity?.(agentGroupId) : undefined);
+      return adapter.deliver(
+        platformId,
+        threadId,
+        { kind, content: JSON.parse(content), files },
+        {
+          senderIdentity: resolvedIdentity,
+        },
+      );
     },
     async setTyping(
       channelType: string,
       platformId: string,
       threadId: string | null,
       instance?: string,
+      agentGroupId?: string,
     ): Promise<void> {
       const adapter = getChannelAdapterExact(instance ?? channelType);
-      await adapter?.setTyping?.(platformId, threadId);
+      const senderIdentity = agentGroupId ? adapter?.resolveSenderIdentity?.(agentGroupId) : undefined;
+      await adapter?.setTyping?.(platformId, threadId, senderIdentity);
+    },
+    async clearTyping(
+      channelType: string,
+      platformId: string,
+      threadId: string | null,
+      instance?: string,
+      agentGroupId?: string,
+    ): Promise<void> {
+      const adapter = getChannelAdapterExact(instance ?? channelType);
+      const senderIdentity = agentGroupId ? adapter?.resolveSenderIdentity?.(agentGroupId) : undefined;
+      await adapter?.clearTyping?.(platformId, threadId, senderIdentity);
     },
   };
 }
@@ -223,9 +227,24 @@ export function getRegisteredChannelNames(): string[] {
   return [...registry.keys()];
 }
 
-/** Get container config for a channel (used by container-runner for additional mounts/env). */
-export function getChannelContainerConfig(name: string): ChannelRegistration['containerConfig'] {
-  return registry.get(name)?.containerConfig;
+export function normalizeChannelPlatformId(channelType: string, platformId: string): string {
+  return registry.get(channelType)?.normalizePlatformId?.(platformId) ?? platformId;
+}
+
+export function sameChannelPlatformAddress(channelType: string, left: string, right: string): boolean {
+  return normalizeChannelPlatformId(channelType, left) === normalizeChannelPlatformId(channelType, right);
+}
+
+/** Resolve every installed channel's optional per-agent container contribution. */
+export function getChannelContainerContributions(agentGroupId: string): ChannelContainerContribution[] {
+  const contributions: ChannelContainerContribution[] = [];
+  for (const registration of registry.values()) {
+    const declaration = registration.containerConfig;
+    if (!declaration) continue;
+    const contribution = typeof declaration === 'function' ? declaration({ agentGroupId }) : declaration;
+    if (contribution) contributions.push(contribution);
+  }
+  return contributions;
 }
 
 /**

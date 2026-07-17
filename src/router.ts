@@ -28,11 +28,9 @@ import {
   getMessagingGroupWithAgentCount,
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
-import { startTypingRefresh, stopTypingRefresh } from './modules/typing/index.js';
+import { deliverAgentInbound } from './agent-inbound/index.js';
 import { log } from './log.js';
-import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
-import { wakeContainer } from './container-runner.js';
-import { getSession } from './db/sessions.js';
+import { resolveSession, writeOutboundDirect } from './session-manager.js';
 import type { AgentGroup, MessagingGroup, MessagingGroupAgent } from './types.js';
 import type { InboundEvent } from './channels/adapter.js';
 
@@ -186,9 +184,10 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   //    resolution, no log spam. Exact-on-instance: an unknown named
   //    instance falls through to auto-create rather than hijacking a
   //    sibling instance's row.
+  const conversationPlatformId = event.conversationPlatformId ?? event.platformId;
   const found = getMessagingGroupWithAgentCount(
     event.channelType,
-    event.platformId,
+    conversationPlatformId,
     event.instance ?? event.channelType,
   );
 
@@ -203,7 +202,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     mg = {
       id: mgId,
       channel_type: event.channelType,
-      platform_id: event.platformId,
+      platform_id: conversationPlatformId,
       // Persist the receiving instance — without this, the first bot's row
       // would absorb every sibling instance's traffic.
       instance: event.instance ?? event.channelType,
@@ -225,7 +224,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
     log.info('Auto-created messaging group', {
       id: mgId,
       channelType: event.channelType,
-      platformId: event.platformId,
+      platformId: conversationPlatformId,
     });
     agentCount = 0;
   } else {
@@ -355,7 +354,7 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
         // Fire-and-forget — subscribe is platform-side bookkeeping and
         // shouldn't block message routing. Errors are logged inside the
         // adapter (or by the promise rejection handler below).
-        void adapter.subscribe(event.platformId, effectiveThreadId).catch((err) => {
+        void adapter.subscribe(conversationPlatformId, effectiveThreadId).catch((err) => {
           log.warn('adapter.subscribe failed', { channelType: event.channelType, threadId: effectiveThreadId, err });
         });
       }
@@ -504,15 +503,25 @@ async function deliverToAgent(
     }
   }
 
-  writeSessionMessage(session.agent_group_id, session.id, {
-    id: messageIdForAgent(event.message.id, agent.agent_group_id),
-    kind: event.message.kind,
-    timestamp: event.message.timestamp,
-    platformId: deliveryAddr.platformId,
-    channelType: deliveryAddr.channelType,
-    threadId: deliveryAddr.threadId,
-    content: event.message.content,
-    trigger: wake ? 1 : 0,
+  await deliverAgentInbound({
+    session,
+    message: {
+      id: messageIdForAgent(event.message.id, agent.agent_group_id),
+      kind: event.message.kind,
+      timestamp: event.message.timestamp,
+      platformId: deliveryAddr.platformId,
+      channelType: deliveryAddr.channelType,
+      threadId: deliveryAddr.threadId,
+      content: event.message.content,
+      trigger: wake ? 1 : 0,
+    },
+    wake,
+    typing: {
+      channelType: event.channelType,
+      platformId: event.platformId,
+      threadId: effectiveThreadId,
+      adapterInstance: mg.instance ?? event.channelType,
+    },
   });
 
   log.info('Message routed', {
@@ -525,28 +534,6 @@ async function deliverToAgent(
     created,
     agentGroupName: agentGroup.name,
   });
-
-  if (wake) {
-    // Typing indicator + wake are only for the engaged branch; accumulated
-    // messages sit silently until a real trigger fires.
-    // Typing fires via the adapter instance that owns this chat's row.
-    startTypingRefresh(
-      session.id,
-      session.agent_group_id,
-      event.channelType,
-      event.platformId,
-      effectiveThreadId,
-      mg.instance,
-    );
-    const freshSession = getSession(session.id);
-    if (freshSession) {
-      const woke = await wakeContainer(freshSession);
-      // wakeContainer never throws — it returns false on transient spawn
-      // failure (host-sweep retries). Stop the typing indicator we just
-      // started so it doesn't leak; the inbound row stays pending.
-      if (!woke) stopTypingRefresh(freshSession.id);
-    }
-  }
 }
 
 /**

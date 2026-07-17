@@ -4,6 +4,7 @@
  * Channel adapters bridge NanoClaw with messaging platforms (Discord, Slack, etc.).
  * Two patterns: native adapters (implement directly) or Chat SDK bridge (wrap a Chat SDK adapter).
  */
+import type { ContainerContribution } from '../container-contribution.js';
 
 /** Passed to the adapter at setup time. */
 export interface ChannelSetup {
@@ -30,13 +31,16 @@ export interface DeliveryAddress {
   channelType: string;
   platformId: string;
   threadId: string | null;
+  /** Adapter instance used for delivery; defaults to channelType. */
+  instance?: string;
 }
 
 /**
  * Full inbound event handed to the router.
  *
- * `channelType` + `platformId` + `threadId` identify which messaging group /
- * session receives the message. `replyTo`, when set, overrides where the
+ * `channelType` + (`conversationPlatformId` ?? `platformId`) + `threadId`
+ * identify which messaging group / session receives the message. `replyTo`,
+ * when set, overrides where the
  * agent's reply is delivered — used by the CLI admin transport when the
  * operator wants a message routed to one channel but replies echoed back to
  * their terminal. Agents cannot set `replyTo`; it is a router-layer concept
@@ -47,11 +51,17 @@ export interface InboundEvent {
   /** Receiving adapter instance; stamped host-side (src/index.ts onInbound).
    *  Absent (e.g. CLI onInboundEvent) means the default instance (= channelType). */
   instance?: string;
+  /**
+   * Optional platform address used only to identify the conversation. This is
+   * useful when the inbound sender and receiving inbox are different
+   * addresses; replies still use `platformId` or the explicit `replyTo`.
+   */
+  conversationPlatformId?: string;
   platformId: string;
   threadId: string | null;
   message: {
     id: string;
-    kind: 'chat' | 'chat-sdk';
+    kind: 'chat' | 'chat-sdk' | 'task';
     content: string; // JSON blob
     timestamp: string;
     /**
@@ -68,7 +78,7 @@ export interface InboundEvent {
 /** Inbound message from adapter to host. */
 export interface InboundMessage {
   id: string;
-  kind: 'chat' | 'chat-sdk';
+  kind: 'chat' | 'chat-sdk' | 'task';
   content: unknown; // JS object — host will JSON.stringify before writing to session DB
   timestamp: string;
   /**
@@ -194,10 +204,18 @@ export interface ChannelAdapter {
   isConnected(): boolean;
 
   // Outbound delivery — returns the platform message ID if available
-  deliver(platformId: string, threadId: string | null, message: OutboundMessage): Promise<string | undefined>;
+  deliver(
+    platformId: string,
+    threadId: string | null,
+    message: OutboundMessage,
+    options?: { senderIdentity?: string },
+  ): Promise<string | undefined>;
 
   // Optional
-  setTyping?(platformId: string, threadId: string | null): Promise<void>;
+  setTyping?(platformId: string, threadId: string | null, senderIdentity?: string): Promise<void>;
+  clearTyping?(platformId: string, threadId: string | null, senderIdentity?: string): Promise<void>;
+  /** Resolve a channel-native sending identity for an agent group. */
+  resolveSenderIdentity?(agentGroupId: string): string | undefined;
   syncConversations?(): Promise<ConversationInfo[]>;
   resolveChannelName?(platformId: string): Promise<string | null>;
 
@@ -242,9 +260,17 @@ export interface ChannelAdapter {
 /** Factory function that creates a channel adapter (returns null if credentials missing). */
 export type ChannelAdapterFactory = () => ChannelAdapter | Promise<ChannelAdapter> | null;
 
+export type ChannelContainerContribution = ContainerContribution;
+
+export type ChannelContainerConfig =
+  | ChannelContainerContribution
+  | ((context: { agentGroupId: string }) => ChannelContainerContribution | undefined);
+
 /** Registration entry for a channel adapter. */
 export interface ChannelRegistration {
   factory: ChannelAdapterFactory;
+  /** Canonicalize platform addresses for DB lookup/equality (for example, strip a resource). */
+  normalizePlatformId?: (platformId: string) => string;
   /**
    * Same declaration as ChannelAdapter.defaults, resolvable WITHOUT
    * instantiating the adapter — offline creation paths (setup/register.ts,
@@ -253,8 +279,5 @@ export interface ChannelRegistration {
    * modules pass the same const here and to the adapter/bridge.
    */
   defaults?: ChannelDefaults;
-  containerConfig?: {
-    mounts?: Array<{ hostPath: string; containerPath: string; readonly: boolean }>;
-    env?: Record<string, string>;
-  };
+  containerConfig?: ChannelContainerConfig;
 }

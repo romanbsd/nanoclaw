@@ -11,7 +11,15 @@ import { TIMEZONE, formatLocalTime } from './timezone.js';
  */
 export type CommandCategory = 'admin' | 'filtered' | 'passthrough' | 'none';
 
-const ADMIN_COMMANDS = new Set(['/remote-control', '/clear', '/compact', '/context', '/cost', '/files', '/upload-trace']);
+const ADMIN_COMMANDS = new Set([
+  '/remote-control',
+  '/clear',
+  '/compact',
+  '/context',
+  '/cost',
+  '/files',
+  '/upload-trace',
+]);
 const FILTERED_COMMANDS = new Set(['/help', '/login', '/logout', '/doctor', '/config', '/start']);
 
 export interface CommandInfo {
@@ -95,27 +103,41 @@ function extractSenderId(msg: MessageInRow, content: any): string | null {
  */
 export interface RoutingContext {
   platformId: string | null;
+  platformKey: string | null;
   channelType: string | null;
   threadId: string | null;
   inReplyTo: string | null;
-  /** Batch is a task run. One-door delivery: only an explicitly addressed tool
-   *  delivers from a task session; final-text `<message to>` blocks are inert
-   *  and the final text auto-appends to the series run log. */
-  taskRun: boolean;
+  /** Defines who owns the provider result for this batch. */
+  responsePolicy: 'channel' | 'task-log' | 'action';
+}
+
+function hasChatText(row: MessageInRow): boolean {
+  if (row.kind !== 'chat' && row.kind !== 'chat-sdk') return false;
+  const text = parseContent(row.content).text;
+  return typeof text === 'string' && text.trim().length > 0;
 }
 
 /**
  * Extract routing context from a batch of messages.
- * Uses the first message's routing fields.
+ * Prefers the first chat row with non-empty text so receipt/ack rows
+ * (empty body, same platform_id as agent) do not hijack reply routing.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const first = messages[0];
+  const routed = [...messages].reverse().find((m) => m.platform_id && hasChatText(m)) ?? messages[0];
   return {
-    platformId: first?.platform_id ?? null,
-    channelType: first?.channel_type ?? null,
-    threadId: first?.thread_id ?? null,
-    inReplyTo: first?.id ?? null,
-    taskRun: messages.length > 0 && messages.every((m) => m.kind === 'task'),
+    platformId: routed?.platform_id ?? null,
+    platformKey: routed?.platform_key ?? routed?.platform_id ?? null,
+    channelType: routed?.channel_type ?? null,
+    threadId: routed?.thread_id ?? null,
+    inReplyTo: routed?.id ?? null,
+    // Action-owned work must never fall back to a human channel if a malformed
+    // mixed batch reaches the runner. Task sessions normally prevent mixing;
+    // this precedence is the final protocol-truthfulness guard.
+    responsePolicy: messages.some((m) => m.kind === 'agent-task')
+      ? 'action'
+      : messages.some((m) => m.kind === 'task')
+        ? 'task-log'
+        : 'channel',
   };
 }
 
@@ -137,7 +159,7 @@ export function formatMessages(messages: MessageInRow[]): string {
 
   // Group by kind
   const chatMessages = messages.filter((m) => m.kind === 'chat' || m.kind === 'chat-sdk');
-  const taskMessages = messages.filter((m) => m.kind === 'task');
+  const taskMessages = messages.filter((m) => m.kind === 'task' || m.kind === 'agent-task');
   const webhookMessages = messages.filter((m) => m.kind === 'webhook');
   const systemMessages = messages.filter((m) => m.kind === 'system');
 
@@ -192,7 +214,7 @@ function formatSingleChat(msg: MessageInRow): string {
  * originated — critical for explicit addressing.
  */
 function originAttr(msg: MessageInRow): string {
-  const fromDest = findByRouting(msg.channel_type, msg.platform_id);
+  const fromDest = findByRouting(msg.channel_type, msg.platform_id, msg.platform_key);
   if (fromDest) return ` from="${escapeXml(fromDest.name)}"`;
   if (msg.channel_type || msg.platform_id) {
     return ` from="unknown:${escapeXml(msg.channel_type || '')}:${escapeXml(msg.platform_id || '')}"`;
@@ -209,6 +231,18 @@ function formatTaskMessage(msg: MessageInRow): string {
     parts.push('Script output:', JSON.stringify(content.scriptOutput, null, 2), '');
   }
   parts.push('Instructions:', stripLegacyTaskContract(content.prompt || ''));
+  // A remote-agent task carries its operation arguments and pinned schemas in
+  // the structured envelope. Dropping that envelope left the model knowing
+  // only the operation name, so it could neither execute the request nor form
+  // a valid task.complete result. Keep the human-readable instruction first,
+  // then expose every remaining task field without duplicating formatter logic
+  // for individual gateway event types.
+  const taskData = { ...content };
+  delete taskData.prompt;
+  delete taskData.scriptOutput;
+  if (Object.keys(taskData).length > 0) {
+    parts.push('', 'Task data:', JSON.stringify(taskData, null, 2));
+  }
   return `<task${from} time="${escapeXml(time)}">${parts.join('\n')}</task>`;
 }
 

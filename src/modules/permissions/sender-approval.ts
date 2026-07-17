@@ -119,19 +119,19 @@ export async function requestSenderApproval(input: RequestSenderApprovalInput): 
   }
 
   try {
-    await adapter.deliver(
-      target.messagingGroup.channel_type,
-      target.messagingGroup.platform_id,
-      null,
-      'chat-sdk',
-      JSON.stringify({
+    await adapter.deliver({
+      channelType: target.messagingGroup.channel_type,
+      platformId: target.messagingGroup.platform_id,
+      threadId: null,
+      kind: 'chat-sdk',
+      content: JSON.stringify({
         type: 'ask_question',
         questionId: approvalId,
         title,
         question,
         options,
       }),
-    );
+    });
     log.info('Unknown-sender approval card delivered', {
       approvalId,
       senderIdentity,

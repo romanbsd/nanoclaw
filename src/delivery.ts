@@ -32,8 +32,10 @@ import { isUnguarded, type Unguarded } from './guard/index.js';
 import { log } from './log.js';
 import { normalizeOptions } from './channels/ask-question.js';
 import { clearOutbox, openInboundDb, openOutboundDb, readOutboxFiles } from './session-manager.js';
-import { pauseTypingRefreshAfterDelivery, setTypingAdapter } from './modules/typing/index.js';
+import { setTypingAdapter, stopTypingRefresh } from './modules/typing/index.js';
 import type { OutboundFile } from './channels/adapter.js';
+import { ChannelUnavailableError } from './channels/errors.js';
+import { normalizeChannelPlatformId, sameChannelPlatformAddress } from './channels/channel-registry.js';
 import type { PendingApproval, Session } from './types.js';
 
 const ACTIVE_POLL_MS = 1000;
@@ -58,19 +60,37 @@ const deliveryAttempts = new Map<string, number>();
  */
 const inflightDeliveries = new Set<string>();
 
+export interface ChannelDeliveryRequest {
+  channelType: string;
+  platformId: string;
+  threadId: string | null;
+  kind: string;
+  content: string;
+  files?: OutboundFile[];
+  /** Delivering adapter instance (defaults to channelType downstream).
+   * Host-internal only — containers never see instance. */
+  instance?: string;
+  /** Optional channel-native identity for the sending agent. */
+  senderIdentity?: string;
+  agentGroupId?: string;
+}
+
 export interface ChannelDeliveryAdapter {
-  deliver(
+  deliver(request: ChannelDeliveryRequest): Promise<string | undefined>;
+  setTyping?(
     channelType: string,
     platformId: string,
     threadId: string | null,
-    kind: string,
-    content: string,
-    files?: OutboundFile[],
-    /** Delivering adapter instance (defaults to channelType downstream).
-     *  Host-internal only — containers never see instance. */
     instance?: string,
-  ): Promise<string | undefined>;
-  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
+    agentGroupId?: string,
+  ): Promise<void>;
+  clearTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    agentGroupId?: string,
+  ): Promise<void>;
 }
 
 let deliveryAdapter: ChannelDeliveryAdapter | null = null;
@@ -205,16 +225,19 @@ async function drainSession(session: Session): Promise<void> {
         markDelivered(inDb, msg.id, platformMsgId ?? null);
         deliveryAttempts.delete(msg.id);
 
-        // Pause the typing indicator after a real user-facing message
-        // lands on the user's screen, so the client has time to visually
-        // clear the indicator before the next heartbeat tick brings it
-        // back. Skip the pause for internal traffic (system actions,
-        // agent-to-agent routing) — the user doesn't see those and
-        // shouldn't get a gap in their typing indicator for them.
+        // Any terminal user-facing response (including an error response)
+        // ends the composing lifecycle. Internal traffic is invisible to the
+        // user and must not affect their typing indicator.
         if (msg.kind !== 'system' && msg.channel_type !== 'agent') {
-          pauseTypingRefreshAfterDelivery(session.id);
+          stopTypingRefresh(session.id);
         }
       } catch (err) {
+        // An offline adapter means no send was attempted. Keep the outbound
+        // row pending and preserve the retry budget until the channel's
+        // connection supervisor reports it online again.
+        if (err instanceof ChannelUnavailableError) {
+          continue;
+        }
         const attempts = (deliveryAttempts.get(msg.id) ?? 0) + 1;
         deliveryAttempts.set(msg.id, attempts);
         if (attempts >= MAX_DELIVERY_ATTEMPTS) {
@@ -257,8 +280,7 @@ async function deliverMessage(
   inDb: Database.Database,
 ): Promise<string | undefined> {
   if (!deliveryAdapter) {
-    log.warn('No delivery adapter configured, dropping message', { id: msg.id });
-    return;
+    throw new ChannelUnavailableError(msg.channel_type ?? 'unknown');
   }
 
   const content = JSON.parse(msg.content);
@@ -324,10 +346,13 @@ async function deliverMessage(
     // reply goes out through the instance the message came in on. Otherwise
     // fall back to the by-platform lookup (default-instance-first).
     const originMg = session.messaging_group_id ? getMessagingGroup(session.messaging_group_id) : undefined;
+    const lookupPlatformId = normalizeChannelPlatformId(msg.channel_type, msg.platform_id);
     const mg =
-      originMg && originMg.channel_type === msg.channel_type && originMg.platform_id === msg.platform_id
+      originMg &&
+      originMg.channel_type === msg.channel_type &&
+      sameChannelPlatformAddress(msg.channel_type, originMg.platform_id, msg.platform_id)
         ? originMg
-        : getMessagingGroupByPlatform(msg.channel_type, msg.platform_id);
+        : getMessagingGroupByPlatform(msg.channel_type, lookupPlatformId);
     if (!mg) {
       throw new Error(`unknown messaging group for ${msg.channel_type}/${msg.platform_id} (message ${msg.id})`);
     }
@@ -394,15 +419,16 @@ async function deliverMessage(
       ? readOutboxFiles(session.agent_group_id, session.id, msg.id, content.files as string[])
       : undefined;
 
-  const platformMsgId = await deliveryAdapter.deliver(
-    msg.channel_type,
-    msg.platform_id,
-    msg.thread_id,
-    msg.kind,
-    msg.content,
+  const platformMsgId = await deliveryAdapter.deliver({
+    channelType: msg.channel_type,
+    platformId: msg.platform_id,
+    threadId: msg.thread_id,
+    kind: msg.kind,
+    content: msg.content,
     files,
-    deliverInstance,
-  );
+    instance: deliverInstance,
+    agentGroupId: session.agent_group_id,
+  });
   log.info('Message delivered', {
     id: msg.id,
     channelType: msg.channel_type,

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  E2E demoboot config — same structure as Openfire distribution/src/conf/openfire-demoboot.xml
+  (see documentation/demoboot-guide.html and documentation/install-guide.html#autosetup).
+  Domain is example.org; map it to the host via docker-compose extra_hosts.
+-->
+<jive>
+  <adminConsole>
+    <port>9090</port>
+    <securePort>9091</securePort>
+  </adminConsole>
+  <connectionProvider>
+    <className>org.jivesoftware.database.EmbeddedConnectionProvider</className>
+  </connectionProvider>
+  <autosetup>
+    <run>true</run>
+    <locale>en</locale>
+    <xmpp>
+      <auth>
+        <anonymous>true</anonymous>
+      </auth>
+      <domain>example.org</domain>
+      <fqdn>example.org</fqdn>
+    </xmpp>
+    <database>
+      <mode>embedded</mode>
+    </database>
+    <admin>
+      <email>admin@example.com</email>
+      <password>admin</password>
+    </admin>
+    <users>
+      <user1>
+        <username>john</username>
+        <password>secret</password>
+        <name>John Doe</name>
+        <email>john.doe@example.com</email>
+      </user1>
+      <user2>
+        <username>assistant</username>
+        <password>secret</password>
+        <name>Default Agent</name>
+        <email>assistant@example.org</email>
+      </user2>
+    </users>
+  </autosetup>
+</jive>

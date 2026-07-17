@@ -208,6 +208,25 @@ describe('routing', () => {
     expect(routing.threadId).toBe('thread-456');
     expect(routing.inReplyTo).toBe('m1');
   });
+
+  it('prefers the most recent chat row with text over empty receipt rows', () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES ('receipt-1', 'chat', datetime('now'), 'pending', 'spark@example.org', 'xmpp', NULL, '{"text":""}')`,
+      )
+      .run();
+    getInboundDb()
+      .prepare(
+        `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, thread_id, content)
+         VALUES ('m2', 'chat', datetime('now'), 'pending', 'john@example.org', 'xmpp', NULL, '{"text":"hello"}')`,
+      )
+      .run();
+
+    const routing = extractRouting(getPendingMessages());
+    expect(routing.platformId).toBe('john@example.org');
+    expect(routing.inReplyTo).toBe('m2');
+  });
 });
 
 describe('origin metadata (from= attribute)', () => {
@@ -220,7 +239,13 @@ describe('origin metadata (from= attribute)', () => {
       .run(name, name, channelType, platformId);
   }
 
-  function insertWithRouting(id: string, kind: string, content: object, channelType: string | null, platformId: string | null): void {
+  function insertWithRouting(
+    id: string,
+    kind: string,
+    content: object,
+    channelType: string | null,
+    platformId: string | null,
+  ): void {
     getInboundDb()
       .prepare(
         `INSERT INTO messages_in (id, kind, timestamp, status, platform_id, channel_type, content)
@@ -325,6 +350,56 @@ describe('mock provider', () => {
   });
 });
 
+describe('active-query follow-up routing', () => {
+  it('routes each result to the follow-up message that prompted it', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, platform_key, agent_group_id)
+         VALUES ('john', 'John', 'channel', 'xmpp', 'john@example.org', 'john@example.org', NULL)`,
+      )
+      .run();
+    const provider = new MockProvider(
+      {},
+      (prompt) => `<message to="john">${prompt.includes('second') ? 'second' : 'first'}</message>`,
+    );
+    const query = provider.query({ prompt: 'first', cwd: '/tmp' });
+    const processing = processQuery(
+      query,
+      {
+        platformId: 'john@example.org/smoke',
+        platformKey: 'john@example.org',
+        channelType: 'xmpp',
+        threadId: null,
+        inReplyTo: 'first-message',
+      },
+      ['first-message'],
+      'opencode',
+      undefined,
+      'first',
+      undefined,
+    );
+
+    setTimeout(() => {
+      getInboundDb()
+        .prepare(
+          `INSERT INTO messages_in
+             (id, kind, timestamp, status, trigger, on_wake, platform_id, platform_key, channel_type, content)
+           VALUES ('second-message', 'chat', ?, 'pending', 1, 0, 'john@example.org/client-1', 'john@example.org', 'xmpp', ?)`,
+        )
+        .run(new Date().toISOString(), JSON.stringify({ text: 'second' }));
+    }, 100);
+    setTimeout(() => query.end(), 900);
+    await processing;
+
+    const out = getUndeliveredMessages();
+    expect(out).toHaveLength(2);
+    expect(out[0].platform_id).toBe('john@example.org/smoke');
+    expect(out[0].in_reply_to).toBe('first-message');
+    expect(out[1].platform_id).toBe('john@example.org/client-1');
+    expect(out[1].in_reply_to).toBe('second-message');
+  });
+});
+
 describe('end-to-end with mock provider', () => {
   it('should read messages_in, process with mock provider, write messages_out', async () => {
     // Insert a chat message into inbound DB
@@ -406,9 +481,11 @@ function makeResultQuery(result: ProviderEvent): { query: AgentQuery; pushes: st
 
 const ERR_ROUTING = {
   platformId: 'chan-1',
+  platformKey: 'chan-1',
   channelType: 'discord',
   threadId: null,
   inReplyTo: 'm1',
+  responsePolicy: 'channel' as const,
 };
 
 describe('error result with no <message> envelope', () => {
@@ -436,6 +513,67 @@ describe('error result with no <message> envelope', () => {
     expect(pushes).toHaveLength(1);
     expect(pushes[0]).toContain('was not delivered');
   });
+
+  it('does not deliver or re-wrap provider prose after a remote task action', async () => {
+    const { query, pushes } = makeResultQuery({
+      type: 'result',
+      text: '<message to="john">Mike says he is doing well.</message>',
+    });
+
+    await processQuery(
+      query,
+      { ...ERR_ROUTING, platformId: 'jane@example.org', channelType: 'xmpp', responsePolicy: 'action' },
+      ['task-1'],
+      'opencode',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    expect(getUndeliveredMessages()).toHaveLength(0);
+    expect(pushes).toHaveLength(0);
+  });
+});
+
+describe('normalized named-destination correlation', () => {
+  it('keeps the current concrete route instead of an older canonical-address message', async () => {
+    getInboundDb()
+      .prepare(
+        `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, platform_key, agent_group_id)
+         VALUES ('john', 'John', 'channel', 'xmpp', 'john@example.org', 'john@example.org', NULL)`,
+      )
+      .run();
+    insertMessage('old-message', 'chat', { text: 'old' });
+    getInboundDb()
+      .prepare(
+        "UPDATE messages_in SET channel_type = 'xmpp', platform_id = 'john@example.org', platform_key = 'john@example.org' WHERE id = 'old-message'",
+      )
+      .run();
+
+    const { query } = makeResultQuery({
+      type: 'result',
+      text: '<message to="john">Jane says she is well.</message>',
+    });
+    await processQuery(
+      query,
+      {
+        platformId: 'john@example.org/client-1',
+        platformKey: 'john@example.org',
+        channelType: 'xmpp',
+        threadId: null,
+        inReplyTo: 'current-message',
+      },
+      ['current-message'],
+      'opencode',
+      undefined,
+      'prompt',
+      undefined,
+    );
+
+    const [out] = getUndeliveredMessages();
+    expect(out.platform_id).toBe('john@example.org/client-1');
+    expect(out.in_reply_to).toBe('current-message');
+  });
 });
 
 describe('isCorruptionError', () => {
@@ -462,17 +600,18 @@ describe('isCorruptionError', () => {
 
 const TASK_ROUTING = {
   platformId: null,
+  platformKey: null,
   channelType: null,
   threadId: 'system:tasks:ser-1',
   inReplyTo: 't1',
-  taskRun: true,
+  responsePolicy: 'task-log' as const,
 };
 
 function taskLogRows(): Array<{ text: string }> {
   return (
-    getOutboundDb()
-      .prepare("SELECT content FROM messages_out WHERE kind = 'task_log' ORDER BY seq")
-      .all() as Array<{ content: string }>
+    getOutboundDb().prepare("SELECT content FROM messages_out WHERE kind = 'task_log' ORDER BY seq").all() as Array<{
+      content: string;
+    }>
   ).map((r) => JSON.parse(r.content) as { text: string });
 }
 

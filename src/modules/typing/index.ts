@@ -7,9 +7,8 @@
  * short interval — but only while the agent is actually WORKING, gated
  * on the heartbeat file's mtime after an initial grace period.
  *
- * After delivering a user-facing message, the refresh is paused for
- * POST_DELIVERY_PAUSE_MS so the client-side indicator can visually
- * clear.
+ * A terminal user-facing response stops the refresher and explicitly clears
+ * the platform typing state.
  *
  * Default module status:
  *   - Lives in src/modules/ for signaling (not really core), but ships
@@ -19,6 +18,7 @@
  */
 import fs from 'fs';
 
+import { log } from '../../log.js';
 import { heartbeatPath } from '../../session-manager.js';
 
 const TYPING_REFRESH_MS = 4000;
@@ -36,16 +36,21 @@ const TYPING_GRACE_MS = 15000;
  * the agent goes idle.
  */
 const HEARTBEAT_FRESH_MS = 6000;
-/**
- * After we deliver a user-facing message, pause typing for this
- * long so the client-side indicator has time to visually clear.
- * Tuned for the longest common expiry (Discord ~10s). The interval
- * stays running; ticks inside the pause just skip the setTyping call.
- */
-const POST_DELIVERY_PAUSE_MS = 10000;
-
 interface TypingAdapter {
-  setTyping?(channelType: string, platformId: string, threadId: string | null, instance?: string): Promise<void>;
+  setTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    agentGroupId?: string,
+  ): Promise<void>;
+  clearTyping?(
+    channelType: string,
+    platformId: string,
+    threadId: string | null,
+    instance?: string,
+    agentGroupId?: string,
+  ): Promise<void>;
 }
 
 interface TypingTarget {
@@ -57,7 +62,6 @@ interface TypingTarget {
   instance?: string;
   interval: NodeJS.Timeout;
   startedAt: number;
-  pausedUntil: number; // epoch ms; 0 = not paused
 }
 
 let adapter: TypingAdapter | null = null;
@@ -74,16 +78,20 @@ export function setTypingAdapter(a: TypingAdapter): void {
   adapter = a;
 }
 
-async function triggerTyping(
+async function setTypingState(
+  state: 'active' | 'cleared',
   channelType: string,
   platformId: string,
   threadId: string | null,
   instance?: string,
+  agentGroupId?: string,
 ): Promise<void> {
   try {
-    await adapter?.setTyping?.(channelType, platformId, threadId, instance);
-  } catch {
-    // Typing is best-effort — don't let it fail delivery or routing.
+    const method = state === 'active' ? adapter?.setTyping : adapter?.clearTyping;
+    await method?.(channelType, platformId, threadId, instance, agentGroupId);
+    // eslint-disable-next-line no-catch-all/no-catch-all -- typing is best-effort; must not block routing
+  } catch (err) {
+    log.debug('Typing state update failed (best-effort)', { state, channelType, platformId, threadId, err });
   }
 }
 
@@ -110,11 +118,10 @@ export function startTypingRefresh(
     // Already refreshing. Fire an immediate tick for the new inbound
     // event and reset the grace window — the new message restarts
     // the container-wake latency budget. Also clear any lingering
-    // post-delivery pause: a new inbound means the user expects
-    // typing to show immediately.
-    triggerTyping(channelType, platformId, threadId, instance).catch(() => {});
+    // terminal state: a new inbound means the user expects typing to show
+    // immediately.
+    void setTypingState('active', channelType, platformId, threadId, instance, agentGroupId);
     existing.startedAt = Date.now();
-    existing.pausedUntil = 0;
     // Keep the stored entry self-consistent: a re-trigger can arrive from
     // a different chat address (agent-shared sessions span messaging
     // groups, possibly on different platforms/instances), so the address
@@ -125,28 +132,42 @@ export function startTypingRefresh(
     existing.platformId = platformId;
     existing.threadId = threadId;
     existing.instance = instance;
+    existing.agentGroupId = agentGroupId;
     return;
   }
 
   // Immediate tick + periodic refresh.
-  triggerTyping(channelType, platformId, threadId, instance).catch(() => {});
+  void setTypingState('active', channelType, platformId, threadId, instance, agentGroupId);
   const startedAt = Date.now();
   const interval = setInterval(() => {
     const entry = typingRefreshers.get(sessionId);
     if (!entry) return; // stopped externally since this tick was scheduled
 
-    // Inside a post-delivery pause: skip setTyping but keep the
-    // interval running so we resume automatically once the pause
-    // expires.
-    if (entry.pausedUntil > Date.now()) return;
-
     const withinGrace = Date.now() - entry.startedAt < TYPING_GRACE_MS;
     if (withinGrace || isHeartbeatFresh(entry.agentGroupId, sessionId)) {
-      triggerTyping(entry.channelType, entry.platformId, entry.threadId, entry.instance).catch(() => {});
+      void setTypingState(
+        'active',
+        entry.channelType,
+        entry.platformId,
+        entry.threadId,
+        entry.instance,
+        entry.agentGroupId,
+      );
       return;
     }
 
     // Out of grace AND heartbeat stale — agent is idle, stop refreshing.
+    // Clear before forgetting the target. Otherwise a provider failure or a
+    // long silent generation can leave clients displaying "composing"
+    // forever, and a later terminal response has no target left to clear.
+    void setTypingState(
+      'cleared',
+      entry.channelType,
+      entry.platformId,
+      entry.threadId,
+      entry.instance,
+      entry.agentGroupId,
+    );
     clearInterval(entry.interval);
     typingRefreshers.delete(sessionId);
   }, TYPING_REFRESH_MS);
@@ -160,25 +181,20 @@ export function startTypingRefresh(
     instance,
     interval,
     startedAt,
-    pausedUntil: 0,
   });
-}
-
-/**
- * Pause the typing refresh for POST_DELIVERY_PAUSE_MS. Called after
- * a user-facing message is delivered so the client-side indicator
- * has a chance to visually clear before the agent's next SDK event
- * pushes it back on. No-op if no refresh is active for this session.
- */
-export function pauseTypingRefreshAfterDelivery(sessionId: string): void {
-  const entry = typingRefreshers.get(sessionId);
-  if (!entry) return;
-  entry.pausedUntil = Date.now() + POST_DELIVERY_PAUSE_MS;
 }
 
 export function stopTypingRefresh(sessionId: string): void {
   const entry = typingRefreshers.get(sessionId);
   if (!entry) return;
+  void setTypingState(
+    'cleared',
+    entry.channelType,
+    entry.platformId,
+    entry.threadId,
+    entry.instance,
+    entry.agentGroupId,
+  );
   clearInterval(entry.interval);
   typingRefreshers.delete(sessionId);
 }

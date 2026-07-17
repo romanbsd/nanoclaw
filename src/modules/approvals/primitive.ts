@@ -262,19 +262,19 @@ export async function requestApproval(opts: RequestApprovalOptions): Promise<voi
   const adapter = getDeliveryAdapter();
   if (adapter) {
     try {
-      await adapter.deliver(
-        target.messagingGroup.channel_type,
-        target.messagingGroup.platform_id,
-        null,
-        'chat-sdk',
-        JSON.stringify({
+      await adapter.deliver({
+        channelType: target.messagingGroup.channel_type,
+        platformId: target.messagingGroup.platform_id,
+        threadId: null,
+        kind: 'chat-sdk',
+        content: JSON.stringify({
           type: 'ask_question',
           questionId: approvalId,
           title,
           question,
           options: APPROVAL_OPTIONS,
         }),
-      );
+      });
     } catch (err) {
       log.error('Failed to deliver approval card', { action, approvalId, err });
       // The single delivery target never saw the card — remove the row so it

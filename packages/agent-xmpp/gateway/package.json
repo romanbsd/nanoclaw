@@ -1,0 +1,31 @@
+{
+  "name": "@agent-xmpp/gateway",
+  "version": "0.1.0",
+  "description": "Always-on XMPP component gateway for NanoClaw agents",
+  "type": "module",
+  "main": "./dist/embedded-gateway.js",
+  "types": "./dist/embedded-gateway.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/embedded-gateway.d.ts",
+      "import": "./dist/embedded-gateway.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && node ../../../node_modules/typescript/bin/tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@agent-xmpp/protocol": "workspace:*",
+    "@xmpp/component": "0.14.0",
+    "@xmpp/xml": "0.14.0",
+    "ulid": "3.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.9"
+  }
+}

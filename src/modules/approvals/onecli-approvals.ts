@@ -152,19 +152,19 @@ async function handleRequest(request: ApprovalRequest): Promise<Decision> {
   ];
   let platformMessageId: string | undefined;
   try {
-    platformMessageId = await adapterRef.deliver(
-      target.messagingGroup.channel_type,
-      target.messagingGroup.platform_id,
-      null,
-      'chat-sdk',
-      JSON.stringify({
+    platformMessageId = await adapterRef.deliver({
+      channelType: target.messagingGroup.channel_type,
+      platformId: target.messagingGroup.platform_id,
+      threadId: null,
+      kind: 'chat-sdk',
+      content: JSON.stringify({
         type: 'ask_question',
         questionId: approvalId,
         title: onecliTitle,
         question,
         options: onecliOptions,
       }),
-    );
+    });
   } catch (err) {
     log.error('Failed to deliver OneCLI approval card', { approvalId, oneCliRequestId: request.id, err });
     return 'deny';
@@ -228,17 +228,17 @@ async function expireApproval(approvalId: string, reason: string): Promise<void>
 async function editCardExpired(row: PendingApproval, reason: string): Promise<void> {
   if (!adapterRef || !row.platform_message_id || !row.channel_type || !row.platform_id) return;
   try {
-    await adapterRef.deliver(
-      row.channel_type,
-      row.platform_id,
-      null,
-      'chat-sdk',
-      JSON.stringify({
+    await adapterRef.deliver({
+      channelType: row.channel_type,
+      platformId: row.platform_id,
+      threadId: null,
+      kind: 'chat-sdk',
+      content: JSON.stringify({
         operation: 'edit',
         messageId: row.platform_message_id,
         text: `Expired (${reason})`,
       }),
-    );
+    });
   } catch (err) {
     log.warn('Failed to edit expired OneCLI approval card', { approvalId: row.approval_id, err });
   }

@@ -176,6 +176,7 @@ CREATE TABLE IF NOT EXISTS messages_in (
   trigger        INTEGER NOT NULL DEFAULT 1,
                  -- 0 = accumulated context (don't wake), 1 = wake agent
   platform_id    TEXT,
+  platform_key   TEXT,            -- adapter-normalized logical address
   channel_type   TEXT,
   thread_id      TEXT,
   content        TEXT NOT NULL,
@@ -210,6 +211,7 @@ CREATE TABLE IF NOT EXISTS destinations (
   type            TEXT NOT NULL,   -- 'channel' | 'agent'
   channel_type    TEXT,            -- for type='channel'
   platform_id     TEXT,            -- for type='channel'
+  platform_key    TEXT,            -- adapter-normalized logical address
   agent_group_id  TEXT             -- for type='agent'
 );
 

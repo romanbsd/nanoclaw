@@ -472,19 +472,19 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
     updatePendingChannelApprovalCard(row.messaging_group_id, title, JSON.stringify(options));
 
     try {
-      await adapter.deliver(
-        approverDm.channel_type,
-        approverDm.platform_id,
-        null,
-        'chat-sdk',
-        JSON.stringify({
+      await adapter.deliver({
+        channelType: approverDm.channel_type,
+        platformId: approverDm.platform_id,
+        threadId: null,
+        kind: 'chat-sdk',
+        content: JSON.stringify({
           type: 'ask_question',
           questionId: row.messaging_group_id,
           title,
           question: 'Which agent should handle this channel?',
           options,
         }),
-      );
+      });
     } catch (err) {
       log.error('Channel registration: agent-selection card delivery failed', {
         messagingGroupId: row.messaging_group_id,
@@ -520,13 +520,13 @@ async function handleChannelApprovalResponse(payload: ResponsePayload): Promise<
     });
 
     try {
-      await adapter.deliver(
-        approverDm.channel_type,
-        approverDm.platform_id,
-        null,
-        'chat-sdk',
-        JSON.stringify({ text: 'Reply with the name for your new agent:' }),
-      );
+      await adapter.deliver({
+        channelType: approverDm.channel_type,
+        platformId: approverDm.platform_id,
+        threadId: null,
+        kind: 'chat-sdk',
+        content: JSON.stringify({ text: 'Reply with the name for your new agent:' }),
+      });
     } catch (err) {
       log.error('Channel registration: name prompt delivery failed', {
         messagingGroupId: row.messaging_group_id,
@@ -619,18 +619,24 @@ registerMessageInterceptor(async (event: InboundEvent): Promise<boolean> => {
     const dm = await ensureUserDm(row.approver_user_id);
     if (dm) {
       adapter
-        .deliver(
-          dm.channel_type,
-          dm.platform_id,
-          null,
-          'chat-sdk',
-          JSON.stringify({
+        .deliver({
+          channelType: dm.channel_type,
+          platformId: dm.platform_id,
+          threadId: null,
+          kind: 'chat-sdk',
+          content: JSON.stringify({
             text: wired
               ? `✅ Agent "${ag.name}" created and connected.`
               : `⚠️ Agent "${ag.name}" was created but the channel couldn't be connected — check the host logs.`,
           }),
-        )
-        .catch(() => {});
+        })
+        .catch((err) =>
+          log.error('Channel registration: agent-created confirmation DM failed', {
+            agentGroupId: ag.id,
+            approverUserId: row.approver_user_id,
+            err,
+          }),
+        );
     }
   }
   return true;

@@ -7,9 +7,12 @@
  * instead of the Unix socket transport.
  *
  * Writes a cli_request system message to outbound.db, polls inbound.db
- * for the response. Self-contained — no imports from agent-runner.
+ * for the response through the shared mailbox request primitive.
  */
 import { Database } from 'bun:sqlite';
+
+import { findSystemResponse, markCompleted } from '../db/messages-in.js';
+import { requestThroughMailbox } from '../mailbox-request.js';
 
 // ---------------------------------------------------------------------------
 // Frame types (mirrors src/cli/frame.ts on the host)
@@ -87,48 +90,6 @@ function writeRequest(req: RequestFrame): void {
   }
 }
 
-/**
- * Poll inbound.db for a cli_response matching our requestId.
- * Opens a fresh connection each poll (mmap_size=0) for cross-mount visibility.
- */
-function pollResponse(requestId: string, timeoutMs: number): ResponseFrame | null {
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    const inDb = new Database(INBOUND_DB, { readonly: true });
-    inDb.exec('PRAGMA busy_timeout = 5000');
-    inDb.exec('PRAGMA mmap_size = 0');
-
-    try {
-      const row = inDb
-        .prepare("SELECT id, content FROM messages_in WHERE status = 'pending' AND content LIKE ?")
-        .get(`%"requestId":"${requestId}"%`) as { id: string; content: string } | null;
-
-      if (row) {
-        // Mark as completed via processing_ack so agent-runner skips it
-        const outDb = new Database(OUTBOUND_DB);
-        outDb.exec('PRAGMA journal_mode = DELETE');
-        outDb.exec('PRAGMA busy_timeout = 5000');
-        outDb
-          .prepare(
-            "INSERT OR REPLACE INTO processing_ack (message_id, status, status_changed) VALUES (?, 'completed', ?)",
-          )
-          .run(row.id, new Date().toISOString());
-        outDb.close();
-
-        const parsed = JSON.parse(row.content);
-        return parsed.frame as ResponseFrame;
-      }
-    } finally {
-      inDb.close();
-    }
-
-    Bun.sleepSync(500);
-  }
-
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Arg parsing (mirrors host-side client.ts)
 // ---------------------------------------------------------------------------
@@ -177,7 +138,9 @@ function parseArgv(argv: string[]): {
 
 function printUsage(): void {
   process.stdout.write(
-    ['Usage: ncl <command> [--key value ...] [--json]', '', 'Run `ncl help` to list available commands.', ''].join('\n'),
+    ['Usage: ncl <command> [--key value ...] [--json]', '', 'Run `ncl help` to list available commands.', ''].join(
+      '\n',
+    ),
   );
 }
 
@@ -247,9 +210,7 @@ function formatHuman(resp: ResponseFrame): string {
   const header = keys.map((k, i) => k.padEnd(widths[i])).join('  ');
   const sep = widths.map((w) => '-'.repeat(w)).join('  ');
   const rows = data.map((r) =>
-    keys
-      .map((k, i) => String((r as Record<string, unknown>)[k] ?? '').padEnd(widths[i]))
-      .join('  '),
+    keys.map((k, i) => String((r as Record<string, unknown>)[k] ?? '').padEnd(widths[i])).join('  '),
   );
 
   return [header, sep, ...rows, ''].join('\n');
@@ -270,12 +231,19 @@ const { command, args, json } = parseArgv(argv);
 const requestId = generateId();
 const req: RequestFrame = { id: requestId, command, args };
 
-writeRequest(req);
-
-const resp = pollResponse(requestId, 30_000);
-
-if (!resp) {
-  process.stderr.write('ncl: command timed out after 30s\n');
+let resp: ResponseFrame;
+try {
+  resp = await requestThroughMailbox({
+    send: () => writeRequest(req),
+    findResponse: () => findSystemResponse(requestId),
+    complete: (responseId) => markCompleted([responseId]),
+    parse: (content) => (JSON.parse(content) as { frame: ResponseFrame }).frame,
+    timeoutMs: 30_000,
+    pollIntervalMs: 500,
+    timeoutMessage: 'command timed out after 30s',
+  });
+} catch (error) {
+  process.stderr.write(`ncl: ${error instanceof Error ? error.message : String(error)}\n`);
   process.exit(2);
 }
 

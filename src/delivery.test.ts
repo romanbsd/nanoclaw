@@ -36,8 +36,10 @@ import {
 } from './db/index.js';
 import { getDeliveredIds } from './db/session-db.js';
 import { resolveSession, resolveTaskSession, outboundDbPath, openInboundDb } from './session-manager.js';
+import './channels/index.js';
 import { deliverSessionMessages, setDeliveryAdapter } from './delivery.js';
 import { createChannelDeliveryAdapter } from './channels/channel-registry.js';
+import { ChannelUnavailableError } from './channels/errors.js';
 
 function now(): string {
   return new Date().toISOString();
@@ -91,7 +93,7 @@ describe('deliverSessionMessages — concurrent invocations', () => {
 
     const calls: string[] = [];
     setDeliveryAdapter({
-      async deliver(_channelType, _platformId, _threadId, _kind, content) {
+      async deliver({ content }) {
         calls.push(content);
         // Hold long enough that the second concurrent caller can race the
         // read-undelivered → markDelivered window.
@@ -114,7 +116,7 @@ describe('deliverSessionMessages — concurrent invocations', () => {
 
     const calls: string[] = [];
     setDeliveryAdapter({
-      async deliver(_channelType, _platformId, _threadId, _kind, content) {
+      async deliver({ content }) {
         calls.push(content);
         return 'plat-msg-id';
       },
@@ -157,6 +159,44 @@ describe('deliverSessionMessages — concurrent invocations', () => {
 });
 
 describe('deliverSessionMessages — retry and permanent failure', () => {
+  it('does not consume the send-failure retry budget while the adapter is offline', async () => {
+    seedAgentAndChannel();
+    const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
+    insertOutbound('ag-1', session.id, 'out-offline');
+
+    let callCount = 0;
+    setDeliveryAdapter({
+      async deliver() {
+        callCount++;
+        throw new ChannelUnavailableError('telegram');
+      },
+    });
+
+    // More polls than MAX_DELIVERY_ATTEMPTS must not mark the row failed.
+    for (let poll = 0; poll < 4; poll++) {
+      await deliverSessionMessages(session);
+    }
+    expect(callCount).toBe(4);
+
+    const pendingDb = openInboundDb('ag-1', session.id);
+    expect(getDeliveredIds(pendingDb).has('out-offline')).toBe(false);
+    pendingDb.close();
+
+    // Once the adapter recovers, the same pending row is delivered normally.
+    setDeliveryAdapter({
+      async deliver() {
+        callCount++;
+        return 'plat-after-reconnect';
+      },
+    });
+    await deliverSessionMessages(session);
+    expect(callCount).toBe(5);
+
+    const deliveredDb = openInboundDb('ag-1', session.id);
+    expect(getDeliveredIds(deliveredDb).has('out-offline')).toBe(true);
+    deliveredDb.close();
+  });
+
   it('retries on adapter failure and marks failed after MAX_DELIVERY_ATTEMPTS (3)', async () => {
     seedAgentAndChannel();
     const { session } = resolveSession('ag-1', 'mg-1', null, 'shared');
@@ -193,11 +233,11 @@ describe('deliverSessionMessages — retry and permanent failure', () => {
     expect(delivered.has('out-flaky')).toBe(true);
   });
 
-  it('does not acknowledge a message when no channel adapter is registered (#2995)', async () => {
+  it('keeps a message pending when no channel adapter is registered (#2995)', async () => {
     // Regression: the real bridge used to return undefined when the exact
     // adapter lookup missed, and drainSession marked the row delivered with
     // platform_message_id=NULL even though no send happened. The bridge must
-    // throw so the row takes the normal retry → failed path. Uses the REAL
+    // throw so the row stays pending without consuming send-failure retries. Uses the REAL
     // createChannelDeliveryAdapter with an empty registry — the state after
     // an adapter factory returns null (missing credentials) at startup.
     seedAgentAndChannel();
@@ -212,19 +252,17 @@ describe('deliverSessionMessages — retry and permanent failure', () => {
     expect(getDeliveredIds(inDb).has('out-offline')).toBe(false);
     inDb.close();
 
-    // Attempts 2 and 3 — exhausts MAX_DELIVERY_ATTEMPTS
+    // Repeated polls while the adapter is absent must preserve the row.
     await deliverSessionMessages(session);
     await deliverSessionMessages(session);
 
-    // The row must end as status='failed', never 'delivered'
+    // No terminal delivered/failed record exists because no send was attempted.
     inDb = openInboundDb('ag-1', session.id);
     const row = inDb
       .prepare('SELECT status, platform_message_id FROM delivered WHERE message_out_id = ?')
       .get('out-offline') as { status: string; platform_message_id: string | null } | undefined;
     inDb.close();
-    expect(row).toBeDefined();
-    expect(row!.status).toBe('failed');
-    expect(row!.platform_message_id).toBeNull();
+    expect(row).toBeUndefined();
   });
 
   it('clears attempt counter on successful delivery', async () => {
@@ -297,7 +335,7 @@ describe('deliverSessionMessages — instance resolution', () => {
 
     const instances: Array<string | undefined> = [];
     setDeliveryAdapter({
-      async deliver(_ct, _pid, _tid, _kind, _content, _files, instance) {
+      async deliver({ instance }) {
         instances.push(instance);
         return 'plat-1';
       },
@@ -314,7 +352,7 @@ describe('deliverSessionMessages — instance resolution', () => {
 
     const instances: Array<string | undefined> = [];
     setDeliveryAdapter({
-      async deliver(_ct, _pid, _tid, _kind, _content, _files, instance) {
+      async deliver({ instance }) {
         instances.push(instance);
         return 'plat-2';
       },
@@ -355,7 +393,7 @@ describe('deliverSessionMessages — permission check', () => {
 
     const calls: string[] = [];
     setDeliveryAdapter({
-      async deliver(_ct, _pid, _tid, _kind, content) {
+      async deliver({ content }) {
         calls.push(content);
         return 'plat-msg';
       },
@@ -391,7 +429,7 @@ describe('deliverSessionMessages — task_log rows (one-door task delivery)', ()
 
     const calls: string[] = [];
     setDeliveryAdapter({
-      async deliver(_c, _p, _t, _k, content) {
+      async deliver({ content }) {
         calls.push(content);
         return 'pm';
       },
@@ -406,5 +444,46 @@ describe('deliverSessionMessages — task_log rows (one-door task delivery)', ()
     // Marked delivered — the row is not retried.
     const delivered = getDeliveredIds(openInboundDb('ag-1', session.id));
     expect(delivered.has('log-1')).toBe(true);
+  });
+});
+
+describe('deliverSessionMessages — XMPP resource replies', () => {
+  it('authorizes against the bare-JID origin and delivers to the full JID', async () => {
+    createAgentGroup({
+      id: 'ag-xmpp',
+      name: 'XMPP Agent',
+      folder: 'xmpp-agent',
+      agent_provider: null,
+      created_at: now(),
+    });
+    createMessagingGroup({
+      id: 'mg-xmpp',
+      channel_type: 'xmpp',
+      platform_id: 'john@example.org',
+      name: 'John',
+      is_group: 0,
+      unknown_sender_policy: 'public',
+      created_at: now(),
+    });
+    const { session } = resolveSession('ag-xmpp', 'mg-xmpp', null, 'shared');
+    const outDb = new Database(outboundDbPath('ag-xmpp', session.id));
+    outDb
+      .prepare(
+        `INSERT INTO messages_out (id, timestamp, kind, platform_id, channel_type, content)
+       VALUES ('out-xmpp-resource', ?, 'chat', 'john@example.org/client-1', 'xmpp', ?)`,
+      )
+      .run(now(), JSON.stringify({ text: 'reply' }));
+    outDb.close();
+
+    const recipients: string[] = [];
+    setDeliveryAdapter({
+      async deliver({ platformId }) {
+        recipients.push(platformId);
+        return 'xmpp-message-1';
+      },
+    });
+
+    await deliverSessionMessages(session);
+    expect(recipients).toEqual(['john@example.org/client-1']);
   });
 });

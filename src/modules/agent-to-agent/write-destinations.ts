@@ -15,6 +15,7 @@ import { replaceDestinations, type DestinationRow } from '../../db/session-db.js
 import { log } from '../../log.js';
 import { inboundDbPath, openInboundDb } from '../../session-manager.js';
 import { getDestinations } from './db/agent-destinations.js';
+import { normalizeChannelPlatformId } from '../../channels/channel-registry.js';
 
 export function writeDestinations(agentGroupId: string, sessionId: string): void {
   const dbPath = inboundDbPath(agentGroupId, sessionId);
@@ -33,6 +34,7 @@ export function writeDestinations(agentGroupId: string, sessionId: string): void
         type: 'channel',
         channel_type: mg.channel_type,
         platform_id: mg.platform_id,
+        platform_key: normalizeChannelPlatformId(mg.channel_type, mg.platform_id),
         agent_group_id: null,
       });
     } else if (row.target_type === 'agent') {
@@ -44,6 +46,7 @@ export function writeDestinations(agentGroupId: string, sessionId: string): void
         type: 'agent',
         channel_type: null,
         platform_id: null,
+        platform_key: null,
         agent_group_id: ag.id,
       });
     }

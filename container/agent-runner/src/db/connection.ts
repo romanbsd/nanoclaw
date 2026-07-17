@@ -198,6 +198,7 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       tries          INTEGER DEFAULT 0,
       trigger        INTEGER NOT NULL DEFAULT 1,
       platform_id    TEXT,
+      platform_key   TEXT,
       channel_type   TEXT,
       thread_id      TEXT,
       content        TEXT NOT NULL,
@@ -215,6 +216,7 @@ export function initTestSessionDb(): { inbound: Database; outbound: Database } {
       type            TEXT NOT NULL,
       channel_type    TEXT,
       platform_id     TEXT,
+      platform_key    TEXT,
       agent_group_id  TEXT
     );
   `);

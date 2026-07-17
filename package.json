@@ -9,7 +9,7 @@
     "ncl": "bin/ncl"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node \"$npm_execpath\" --filter './packages/**' -r --if-present run build && tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
@@ -23,14 +23,21 @@
     "chat": "tsx scripts/chat.ts",
     "lint": "eslint src/",
     "lint:fix": "eslint src/ --fix",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "vitest run && node \"$npm_execpath\" --filter './packages/**' -r --if-present run test",
+    "test:watch": "vitest",
+    "build:xmpp": "pnpm --filter @agent-xmpp/protocol build && pnpm --filter @agent-xmpp/gateway build",
+    "test:xmpp-e2e": "pnpm run build:xmpp && pnpm --filter @agent-xmpp/integration e2e:embedded",
+    "start:xmpp-orchestrator": "tsx src/modules/xmpp-agent-gateway/orchestrator-server.ts",
+    "demo:xmpp-agents": "bash scripts/run-xmpp-two-agents-demo.sh"
   },
   "dependencies": {
+    "@agent-xmpp/gateway": "workspace:*",
+    "@agent-xmpp/orchestrator": "workspace:*",
+    "@agent-xmpp/protocol": "workspace:*",
     "@clack/core": "^1.2.0",
     "@clack/prompts": "^1.2.0",
     "@onecli-sh/sdk": "2.2.1",
-    "better-sqlite3": "11.10.0",
+    "better-sqlite3": "12.11.1",
     "chat": "4.29.0",
     "cron-parser": "5.5.0",
     "kleur": "^4.1.5",
@@ -45,7 +52,7 @@
     "globals": "^15.12.0",
     "husky": "^9.1.7",
     "prettier": "^3.8.1",
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.0",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.35.0",
     "vitest": "^4.0.18"

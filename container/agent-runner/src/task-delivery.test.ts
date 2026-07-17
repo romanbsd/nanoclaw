@@ -35,10 +35,11 @@ function seedDestination(name = 'family', channelType = 'telegram', platformId =
 
 const taskRouting: RoutingContext = {
   platformId: 'ag-1',
+  platformKey: 'ag-1',
   channelType: 'agent',
   threadId: 'system:tasks:daily-digest-a1b2',
   inReplyTo: 'run-1',
-  taskRun: true,
+  responsePolicy: 'task-log',
 };
 
 beforeEach(() => {
@@ -139,7 +140,7 @@ describe('final-output blocks in a task run', () => {
   it('still delivers final-output blocks in chat sessions', () => {
     const { sent, taskBlocks } = dispatchResultText('<message to="family">hi</message>', {
       ...taskRouting,
-      taskRun: false,
+      responsePolicy: 'channel',
     });
 
     expect(sent).toBe(1);
@@ -149,10 +150,10 @@ describe('final-output blocks in a task run', () => {
 
   it('nudges at most once and only when a task result contains inert blocks', () => {
     const blocks = [{ to: 'family', body: 'digest' }];
-    expect(shouldNudgeTaskBlocks(true, blocks, false)).toBe(true);
-    expect(shouldNudgeTaskBlocks(true, blocks, true)).toBe(false);
-    expect(shouldNudgeTaskBlocks(true, [], false)).toBe(false);
-    expect(shouldNudgeTaskBlocks(false, blocks, false)).toBe(false);
+    expect(shouldNudgeTaskBlocks('task-log', blocks, false)).toBe(true);
+    expect(shouldNudgeTaskBlocks('task-log', blocks, true)).toBe(false);
+    expect(shouldNudgeTaskBlocks('task-log', [], false)).toBe(false);
+    expect(shouldNudgeTaskBlocks('channel', blocks, false)).toBe(false);
   });
 
   it('shows the exact content and makes re-send conditional', () => {
@@ -170,11 +171,11 @@ describe('final-output blocks in a task run', () => {
     const original = '<message to="family">digest</message>';
     const first = dispatchResultText(original, taskRouting);
     if (!nudged) autoAppendTaskLog(original);
-    nudged = shouldNudgeTaskBlocks(true, first.taskBlocks, nudged);
+    nudged = shouldNudgeTaskBlocks('task-log', first.taskBlocks, nudged);
 
     const retry = dispatchResultText('Delivery decision handled.', taskRouting);
     if (!nudged) autoAppendTaskLog('Delivery decision handled.');
-    expect(shouldNudgeTaskBlocks(true, retry.taskBlocks, nudged)).toBe(false);
+    expect(shouldNudgeTaskBlocks('task-log', retry.taskBlocks, nudged)).toBe(false);
 
     const rows = getOutboundDb().prepare("SELECT content FROM messages_out WHERE kind = 'task_log'").all() as {
       content: string;

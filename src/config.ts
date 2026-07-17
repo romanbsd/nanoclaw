@@ -54,8 +54,14 @@ const HOME_DIR = process.env.HOME || os.homedir();
 export const MOUNT_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', 'mount-allowlist.json');
 export const SENDER_ALLOWLIST_PATH = path.join(HOME_DIR, '.config', 'nanoclaw', 'sender-allowlist.json');
 export const STORE_DIR = path.resolve(PROJECT_ROOT, 'store');
-export const GROUPS_DIR = path.resolve(PROJECT_ROOT, 'groups');
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data');
+// Runtime-directory overrides keep integration/demo installs isolated from the
+// operator's real agents while preserving the repository root for shared code.
+export const GROUPS_DIR = process.env.NANOCLAW_GROUPS_DIR
+  ? path.resolve(process.env.NANOCLAW_GROUPS_DIR)
+  : path.resolve(PROJECT_ROOT, 'groups');
+export const DATA_DIR = process.env.NANOCLAW_DATA_DIR
+  ? path.resolve(process.env.NANOCLAW_DATA_DIR)
+  : path.resolve(PROJECT_ROOT, 'data');
 // Local agent-template library. Committed but ships empty (+ README). Resolved
 // once at load. Override to another LOCAL path via NANOCLAW_TEMPLATES_DIR; never
 // a remote URL, never an ncl flag, never runtime-mutable.
@@ -69,7 +75,7 @@ export const CONTAINER_IMAGE_BASE = process.env.CONTAINER_IMAGE_BASE || getConta
 export const CONTAINER_IMAGE = process.env.CONTAINER_IMAGE || getDefaultContainerImage(PROJECT_ROOT);
 // Install slug — stamped onto every spawned container via --label so
 // cleanupOrphans only reaps containers from this install, not peers.
-export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
+export const INSTALL_SLUG = process.env.NANOCLAW_INSTALL_SLUG || getInstallSlug(PROJECT_ROOT);
 export const CONTAINER_INSTALL_LABEL = `nanoclaw-install=${INSTALL_SLUG}`;
 export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 export const ONECLI_API_KEY = process.env.ONECLI_API_KEY || envConfig.ONECLI_API_KEY;

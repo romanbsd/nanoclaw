@@ -165,12 +165,12 @@ describe('unknown-channel registration flow', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(deliverMock).toHaveBeenCalledTimes(1);
-    const [channel, platformId, thread, kind, content] = deliverMock.mock.calls[0];
-    expect(channel).toBe('telegram');
-    expect(platformId).toBe('dm-owner'); // delivered to owner's DM
-    expect(thread).toBeNull();
-    expect(kind).toBe('chat-sdk');
-    const payload = JSON.parse(content as string);
+    const request = deliverMock.mock.calls[0][0];
+    expect(request.channelType).toBe('telegram');
+    expect(request.platformId).toBe('dm-owner'); // delivered to owner's DM
+    expect(request.threadId).toBeNull();
+    expect(request.kind).toBe('chat-sdk');
+    const payload = JSON.parse(request.content as string);
     expect(payload.type).toBe('ask_question');
     // Card tells the approver the resolved engage rule.
     expect(payload.question).toContain('will respond to @-mentions in this group');
@@ -192,7 +192,7 @@ describe('unknown-channel registration flow', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(deliverMock).toHaveBeenCalledTimes(1);
-    const payload = JSON.parse(deliverMock.mock.calls[0][4] as string) as { question: string };
+    const payload = JSON.parse(deliverMock.mock.calls[0][0].content as string) as { question: string };
     expect(payload.question).toContain('will respond to all messages');
     const { getDb } = await import('../../db/connection.js');
     const count = (getDb().prepare('SELECT COUNT(*) AS c FROM pending_channel_approvals').get() as { c: number }).c;
@@ -548,7 +548,7 @@ describe('unknown-channel registration flow', () => {
     };
     expect(pending).toBeDefined();
     expect(deliverMock).toHaveBeenCalledTimes(1);
-    expect(deliverMock.mock.calls[0][1]).toBe('dm-scoped-admin');
+    expect(deliverMock.mock.calls[0][0].platformId).toBe('dm-scoped-admin');
 
     for (const handler of getResponseHandlers()) {
       const claimed = await handler({
@@ -562,7 +562,7 @@ describe('unknown-channel registration flow', () => {
       if (claimed) break;
     }
 
-    const followupPayload = JSON.parse(deliverMock.mock.calls[1][4] as string) as {
+    const followupPayload = JSON.parse(deliverMock.mock.calls[1][0].content as string) as {
       options: Array<{ label: string; value: string }>;
     };
     expect(followupPayload.options.map((option) => option.value)).toContain('connect:ag-1');

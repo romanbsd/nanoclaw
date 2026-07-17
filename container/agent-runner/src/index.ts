@@ -59,7 +59,7 @@ async function main(): Promise<void> {
   // base (/app/CLAUDE.md) and each enabled module's fragment. Memory is
   // supplied separately by each provider's native lifecycle hook.
   const taskId = getTaskSeriesId();
-  const instructions = buildSystemPromptAddendum(
+  let instructions = buildSystemPromptAddendum(
     config.assistantName || undefined,
     taskId ? { kind: 'task', taskId } : { kind: 'chat' },
   );

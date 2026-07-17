@@ -62,7 +62,7 @@ function now(): string {
 let delivered: Array<{ channelType: string; platformId: string; content: string }>;
 
 const fakeAdapter: ChannelDeliveryAdapter = {
-  async deliver(channelType, platformId, _threadId, _kind, content) {
+  async deliver({ channelType, platformId, content }) {
     delivered.push({ channelType, platformId, content });
     return 'pm-1';
   },

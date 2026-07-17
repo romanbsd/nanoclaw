@@ -60,6 +60,7 @@ export interface DestinationRow {
   type: 'channel' | 'agent';
   channel_type: string | null;
   platform_id: string | null;
+  platform_key: string | null;
   agent_group_id: string | null;
 }
 
@@ -67,8 +68,8 @@ export function replaceDestinations(db: Database.Database, entries: DestinationR
   const tx = db.transaction((rows: DestinationRow[]) => {
     db.prepare('DELETE FROM destinations').run();
     const stmt = db.prepare(
-      `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, agent_group_id)
-       VALUES (@name, @display_name, @type, @channel_type, @platform_id, @agent_group_id)`,
+      `INSERT INTO destinations (name, display_name, type, channel_type, platform_id, platform_key, agent_group_id)
+       VALUES (@name, @display_name, @type, @channel_type, @platform_id, @platform_key, @agent_group_id)`,
     );
     for (const row of rows) stmt.run(row);
   });
@@ -98,6 +99,7 @@ export function insertMessage(
     kind: string;
     timestamp: string;
     platformId: string | null;
+    platformKey?: string | null;
     channelType: string | null;
     threadId: string | null;
     content: string;
@@ -122,10 +124,11 @@ export function insertMessage(
   },
 ): void {
   db.prepare(
-    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
-     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake)`,
+    `INSERT INTO messages_in (id, seq, kind, timestamp, status, platform_id, platform_key, channel_type, thread_id, content, process_after, recurrence, series_id, trigger, source_session_id, on_wake)
+     VALUES (@id, @seq, @kind, @timestamp, 'pending', @platformId, @platformKey, @channelType, @threadId, @content, @processAfter, @recurrence, @id, @trigger, @sourceSessionId, @onWake)`,
   ).run({
     ...message,
+    platformKey: message.platformKey ?? null,
     trigger: message.trigger ?? 1,
     onWake: message.onWake ?? 0,
     sourceSessionId: message.sourceSessionId ?? null,
@@ -331,6 +334,20 @@ export function migrateMessagesInTable(db: Database.Database): void {
     // 1 = only deliver on the container's first poll (fresh start).
     // All existing rows are normal messages, so default 0.
     db.prepare('ALTER TABLE messages_in ADD COLUMN on_wake INTEGER NOT NULL DEFAULT 0').run();
+  }
+  if (!cols.has('platform_key')) {
+    db.prepare('ALTER TABLE messages_in ADD COLUMN platform_key TEXT').run();
+  }
+  const hasDestinations = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'destinations'")
+    .get();
+  if (hasDestinations) {
+    const destinationCols = new Set(
+      (db.prepare("PRAGMA table_info('destinations')").all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!destinationCols.has('platform_key')) {
+      db.prepare('ALTER TABLE destinations ADD COLUMN platform_key TEXT').run();
+    }
   }
 }
 

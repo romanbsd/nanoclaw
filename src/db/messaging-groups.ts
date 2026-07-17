@@ -167,7 +167,10 @@ export function setMessagingGroupDeniedAt(id: string, deniedAt: string | null): 
  * a numeric suffix to break collisions within the agent's namespace. This
  * mirrors the backfill logic in migration 004.
  */
-export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
+export function createMessagingGroupAgent(
+  mga: MessagingGroupAgent,
+  options: { createDestination?: boolean } = {},
+): void {
   getDb()
     .prepare(
       `INSERT INTO messaging_group_agents (
@@ -183,7 +186,9 @@ export function createMessagingGroupAgent(mga: MessagingGroupAgent): void {
     )
     .run(mga);
 
-  ensureAgentDestinationForWiring(mga);
+  if (options.createDestination !== false) {
+    ensureAgentDestinationForWiring(mga);
+  }
 }
 
 /**
@@ -216,11 +221,11 @@ export function ensureAgentDestinationForWiring(mga: MessagingGroupAgent): void 
   // delivery is also skipped (same guard), so channel sends still work.
   if (!hasTable(getDb(), 'agent_destinations')) return;
 
-  const existing = getDestinationByTarget(mga.agent_group_id, 'channel', mga.messaging_group_id);
-  if (existing) return;
-
   const mg = getMessagingGroup(mga.messaging_group_id);
   if (!mg) return;
+
+  const existing = getDestinationByTarget(mga.agent_group_id, 'channel', mga.messaging_group_id);
+  if (existing) return;
 
   const base = normalizeName(mg.name || `${mg.channel_type}-${mga.messaging_group_id.slice(0, 8)}`);
   let localName = base;

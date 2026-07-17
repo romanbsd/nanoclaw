@@ -17,8 +17,10 @@ import path from 'path';
 import { deriveAttachmentName } from './attachment-naming.js';
 import { isSafeAttachmentName } from './attachment-safety.js';
 import type { OutboundFile } from './channels/adapter.js';
+import { normalizeChannelPlatformId } from './channels/channel-registry.js';
 import { DATA_DIR } from './config.js';
 import { ensureContainedInboxDir, isPathInside } from './inbox-safety.js';
+import { getAgentGroup } from './db/agent-groups.js';
 import { getMessagingGroup } from './db/messaging-groups.js';
 import {
   createSession,
@@ -177,27 +179,41 @@ export function writeSessionRouting(agentGroupId: string, sessionId: string): vo
   const session = getSession(sessionId);
   if (!session) return;
 
-  let channelType: string | null = null;
-  let platformId: string | null = null;
-  if (session.messaging_group_id) {
-    const mg = getMessagingGroup(session.messaging_group_id);
-    if (mg) {
-      channelType = mg.channel_type;
-      platformId = mg.platform_id;
-    }
-  }
-
   const db = openInboundDb(agentGroupId, sessionId);
   try {
+    // Prefer the latest address actually delivered to this session. This is
+    // the authoritative reply route for shared sessions and for transports
+    // where the receiving conversation address differs from the sender.
+    const latest = db
+      .prepare(
+        `SELECT channel_type, platform_id, thread_id
+           FROM messages_in
+          WHERE channel_type IS NOT NULL AND platform_id IS NOT NULL
+       ORDER BY seq DESC
+          LIMIT 1`,
+      )
+      .get() as { channel_type: string; platform_id: string; thread_id: string | null } | undefined;
+
+    let channelType = latest?.channel_type ?? null;
+    let platformId = latest?.platform_id ?? null;
+    const threadId = latest?.thread_id ?? session.thread_id;
+    if (!latest && session.messaging_group_id) {
+      const mg = getMessagingGroup(session.messaging_group_id);
+      if (mg) {
+        channelType = mg.channel_type;
+        platformId = mg.platform_id;
+      }
+    }
+
     upsertSessionRouting(db, {
       channel_type: channelType,
       platform_id: platformId,
-      thread_id: session.thread_id,
+      thread_id: threadId,
     });
+    log.debug('Session routing written', { sessionId, channelType, platformId, threadId });
   } finally {
     db.close();
   }
-  log.debug('Session routing written', { sessionId, channelType, platformId, threadId: session.thread_id });
 }
 
 /**
@@ -255,20 +271,36 @@ export function writeSessionMessage(
 
   const db = openInboundDb(agentGroupId, sessionId);
   try {
-    insertMessage(db, {
-      id: message.id,
-      kind: message.kind,
-      timestamp: message.timestamp,
-      platformId: message.platformId ?? null,
-      channelType: message.channelType ?? null,
-      threadId: message.threadId ?? null,
-      content,
-      processAfter: message.processAfter ?? null,
-      recurrence: message.recurrence ?? null,
-      trigger: message.trigger ?? 1,
-      sourceSessionId: message.sourceSessionId ?? null,
-      onWake: message.onWake ?? 0,
-    });
+    db.transaction(() => {
+      insertMessage(db, {
+        id: message.id,
+        kind: message.kind,
+        timestamp: message.timestamp,
+        platformId: message.platformId ?? null,
+        platformKey:
+          message.platformId && message.channelType
+            ? normalizeChannelPlatformId(message.channelType, message.platformId)
+            : null,
+        channelType: message.channelType ?? null,
+        threadId: message.threadId ?? null,
+        content,
+        processAfter: message.processAfter ?? null,
+        recurrence: message.recurrence ?? null,
+        trigger: message.trigger ?? 1,
+        sourceSessionId: message.sourceSessionId ?? null,
+        onWake: message.onWake ?? 0,
+      });
+      // Keep the reply route in the same transaction as the inbound row. A
+      // container can never observe a new message with the previous peer's
+      // routing, even for agent-shared sessions and dynamic inbox addresses.
+      if (message.platformId && message.channelType) {
+        upsertSessionRouting(db, {
+          channel_type: message.channelType,
+          platform_id: message.platformId,
+          thread_id: message.threadId ?? null,
+        });
+      }
+    })();
   } finally {
     db.close();
   }

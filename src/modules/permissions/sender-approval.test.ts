@@ -161,12 +161,12 @@ describe('unknown-sender request_approval flow', () => {
     await new Promise((r) => setTimeout(r, 10));
 
     expect(deliverMock).toHaveBeenCalledTimes(1);
-    const [channel, platformId, thread, kind, content] = deliverMock.mock.calls[0];
-    expect(channel).toBe('telegram');
-    expect(platformId).toBe('dm-owner'); // delivered to owner's DM
-    expect(thread).toBeNull();
-    expect(kind).toBe('chat-sdk');
-    const payload = JSON.parse(content as string);
+    const request = deliverMock.mock.calls[0][0];
+    expect(request.channelType).toBe('telegram');
+    expect(request.platformId).toBe('dm-owner'); // delivered to owner's DM
+    expect(request.threadId).toBeNull();
+    expect(request.kind).toBe('chat-sdk');
+    const payload = JSON.parse(request.content as string);
     expect(payload.type).toBe('ask_question');
     expect(payload.questionId).toMatch(/^nsa-/);
 

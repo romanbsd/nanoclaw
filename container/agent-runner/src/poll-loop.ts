@@ -359,6 +359,10 @@ export async function processQuery(
   // the same prompt again. Unused (and unmaintained) when the provider
   // doesn't implement `onExchangeComplete`.
   const archivePrompts: string[] = [initialPrompt];
+  // OpenCode keeps one query stream alive across several user turns. Each
+  // result must use the route of the prompt it answers, not the route that
+  // happened to open the long-lived stream.
+  const resultRoutes: RoutingContext[] = [routing];
 
   // Concurrent polling: push follow-ups into the active query as they arrive.
   // We do NOT force-end the stream on silence — keeping the query open avoids
@@ -435,11 +439,14 @@ export async function processQuery(
 
         const keptIds = keep.map((m) => m.id);
         const prompt = formatMessages(keep);
+        const followUpRouting = extractRouting(keep);
         log(`Pushing ${keep.length} follow-up message(s) into active query`);
         unwrappedNudged = false;
         taskBlockNudged = false;
+        setCurrentInReplyTo(followUpRouting.inReplyTo);
         query.push(prompt);
         archivePrompts.push(prompt);
+        resultRoutes.push(followUpRouting);
         markCompleted(keptIds);
       } catch (err) {
         // Without this catch the rejection escapes the void IIFE and Node
@@ -494,6 +501,7 @@ export async function processQuery(
         // Claude session with no prior context.
         setContinuation(providerName, event.continuation);
       } else if (event.type === 'result') {
+        const resultRouting = resultRoutes[0] ?? routing;
         // A result — with or without text — means the turn is done. Mark
         // the initial batch completed now so the host sweep doesn't see
         // stale 'processing' claims while the query stays open for
@@ -502,20 +510,20 @@ export async function processQuery(
         // at all — either way the turn is finished.
         markCompleted(initialBatchIds);
         if (event.text) {
-          const { sent, hasUnwrapped, taskBlocks } = dispatchResultText(event.text, routing);
-          const willRetryTaskBlocks = shouldNudgeTaskBlocks(routing.taskRun, taskBlocks, taskBlockNudged);
+          const { sent, hasUnwrapped, taskBlocks } = dispatchResultText(event.text, resultRouting);
+          const willRetryTaskBlocks = shouldNudgeTaskBlocks(resultRouting.responsePolicy, taskBlocks, taskBlockNudged);
           // One-door task delivery: the final text becomes the run log entry
           // while explicit append-log calls remain optional additive notes.
           // Errors included: a failed run's text belongs in its log, not chat.
           // A corrective retry handles delivery only; its result is not a
           // second run summary.
-          if (routing.taskRun && !taskBlockNudged) autoAppendTaskLog(event.text);
-          if (sent === 0 && event.isError === true && !routing.taskRun) {
+          if (resultRouting.responsePolicy === 'task-log' && !taskBlockNudged) autoAppendTaskLog(event.text);
+          if (sent === 0 && event.isError === true && resultRouting.responsePolicy === 'channel') {
             // Non-retryable error turn (e.g. a 403 billing_error) with no
             // <message> envelope: deliver the notice instead of dropping it as
             // scratchpad, and skip the re-wrap nudge — it would just re-hammer
             // the failing gateway turn after turn.
-            deliverErrorResult(event.text, routing);
+            deliverErrorResult(event.text, resultRouting);
             notifyExchangeComplete(onExchangeComplete, {
               prompt: archivePrompts[0] ?? initialPrompt,
               result: event.text,
@@ -523,6 +531,7 @@ export async function processQuery(
               status: 'error',
             });
             archivePrompts.shift();
+            resultRoutes.shift();
           } else {
             const willRetryWrapping = hasUnwrapped && !unwrappedNudged;
             notifyExchangeComplete(onExchangeComplete, {
@@ -552,9 +561,15 @@ export async function processQuery(
             // A retry result (wrapping or task-block nudge) answers the SAME
             // user prompt — keep it queued so the retry archives against it,
             // not the nudge text.
-            if (!willRetryWrapping && !willRetryTaskBlocks) archivePrompts.shift();
+            if (!willRetryWrapping && !willRetryTaskBlocks) {
+              archivePrompts.shift();
+              resultRoutes.shift();
+            }
           }
-        } else archivePrompts.shift();
+        } else {
+          archivePrompts.shift();
+          resultRoutes.shift();
+        }
       }
     }
   } catch (err) {
@@ -642,6 +657,14 @@ export function dispatchResultText(
   text: string,
   routing: RoutingContext,
 ): { sent: number; hasUnwrapped: boolean; taskBlocks: TaskMessageBlock[] } {
+  if (routing.responsePolicy === 'action') {
+    // Remote tasks return through task.complete/task.fail system actions. A
+    // provider may still emit final prose after the tool call; treating that
+    // prose as channel output leaks the callee's response to the human route,
+    // while the normal re-wrap nudge starts an unnecessary second model turn.
+    log('Ignoring provider final text for task batch; task actions own the return path');
+    return { sent: 0, hasUnwrapped: false, taskBlocks: [] };
+  }
   const MESSAGE_RE = /<message\s+to="([^"]+)"\s*>([\s\S]*?)<\/message>/g;
 
   let match: RegExpExecArray | null;
@@ -664,7 +687,7 @@ export function dispatchResultText(
     // A final-text <message to> block here is either an echo of a tool send the
     // agent already made (the double-delivery class) or a send down the wrong
     // path — never deliver it, keep it visible in the scratchpad/run log.
-    if (routing.taskRun) {
+    if (routing.responsePolicy === 'task-log') {
       log(`Task run: <message to="${toName}"> block not delivered — task sessions send only via explicit tools`);
       scratchpadParts.push(
         `[not delivered — task sessions send only via the send_message tool; to="${toName}"] ${body}`,
@@ -693,7 +716,7 @@ export function dispatchResultText(
 
   // In a task run, plain final text is the NORMAL ending (it becomes the run
   // log) — never treat it as an undelivered reply or nudge the agent to wrap it.
-  const hasUnwrapped = !routing.taskRun && sent === 0 && !!scratchpad;
+  const hasUnwrapped = routing.responsePolicy === 'channel' && sent === 0 && !!scratchpad;
   if (hasUnwrapped) {
     log(`WARNING: agent output had no <message to="..."> blocks — nothing was sent`);
   }
@@ -706,11 +729,11 @@ export function dispatchResultText(
  * (mirrors the unwrappedNudged flag for chat turns).
  */
 export function shouldNudgeTaskBlocks(
-  taskRun: boolean,
+  responsePolicy: RoutingContext['responsePolicy'],
   taskBlocks: TaskMessageBlock[],
   alreadyNudged: boolean,
 ): boolean {
-  return taskRun && taskBlocks.length > 0 && !alreadyNudged;
+  return responsePolicy === 'task-log' && taskBlocks.length > 0 && !alreadyNudged;
 }
 
 export function buildTaskBlockNudge(taskBlocks: TaskMessageBlock[], destinationNames: string): string {
@@ -759,13 +782,21 @@ export function autoAppendTaskLog(text: string): void {
 }
 
 function sendToDestination(dest: DestinationEntry, body: string, routing: RoutingContext): void {
-  const platformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
+  const configuredPlatformId = dest.type === 'channel' ? dest.platformId! : dest.agentGroupId!;
   const channelType = dest.type === 'channel' ? dest.channelType! : 'agent';
   // Resolve thread_id per-destination from the most recent inbound message
   // that came from this same channel+platform. In agent-shared sessions,
   // different destinations have different thread contexts — using a single
   // routing.threadId would stamp one channel's thread onto another.
-  const destRouting = resolveDestinationThread(channelType, platformId);
+  const currentDestination =
+    channelType === routing.channelType &&
+    routing.platformId !== null &&
+    (configuredPlatformId === routing.platformId ||
+      (dest.platformKey !== undefined && dest.platformKey === routing.platformKey));
+  const platformId = currentDestination ? routing.platformId : configuredPlatformId;
+  const destRouting = currentDestination
+    ? { threadId: routing.threadId, inReplyTo: routing.inReplyTo }
+    : resolveDestinationThread(channelType, configuredPlatformId);
   writeMessageOut({
     id: generateId(),
     in_reply_to: destRouting?.inReplyTo ?? routing.inReplyTo,

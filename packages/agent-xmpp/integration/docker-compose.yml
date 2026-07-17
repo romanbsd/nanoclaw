@@ -1,0 +1,42 @@
+services:
+  openfire:
+    build:
+      context: ./openfire
+      dockerfile: Dockerfile
+      args:
+        OPENFIRE_VERSION: "5.1.0"
+        MONITORING_PLUGIN_VERSION: "2.7.0"
+        HTTPFILEUPLOAD_PLUGIN_VERSION: "1.5.0"
+        RESTAPI_PLUGIN_VERSION: "1.12.0"
+    image: clawdike-openfire:5.1.0-e2e
+    # Host-side bootstrap + orchestrator E2E read OPENFIRE_REST_SECRET (default e2e-rest-secret).
+    # Openfire entrypoint passes args starting with '-' to bin/openfire.sh (-demoboot copies
+    # conf/openfire-demoboot.xml → conf/openfire.xml; see distribution/src/bin/openfire.sh).
+    command: ["-demoboot"]
+    environment:
+      OPENFIRE_OPTS: >-
+        -DadminConsole.access.allow-wildcards-in-excludes=true
+        -Dplugin.restapi.enabled=true
+        -Dplugin.restapi.secret=e2e-rest-secret
+        -Dplugin.restapi.httpAuth=secret
+    ports:
+      - "${E2E_XMPP_PORT:-15222}:5222"
+      - "${E2E_COMPONENT_PORT:-15275}:5275"
+      - "${E2E_OPENFIRE_ADMIN_PORT:-19090}:9090"
+      - "${E2E_HTTP_BIND_PORT:-17070}:7070"
+    extra_hosts:
+      # In-container only; host-side clients use 127.0.0.1 + example.org domain.
+      - "example.org:host-gateway"
+    volumes:
+      - openfire_data:/var/lib/openfire
+      # Replace stock demoboot (single john user is enough for ping E2E).
+      - ./openfire/openfire-demoboot.xml:/usr/local/openfire/conf_org/openfire-demoboot.xml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9090/login.jsp > /dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 45s
+
+volumes:
+  openfire_data:

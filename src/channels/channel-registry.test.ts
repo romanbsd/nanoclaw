@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 
-import type { ChannelAdapter, ChannelSetup, InboundMessage, OutboundMessage } from './adapter.js';
+import { type ChannelAdapter, type ChannelSetup, type InboundMessage, type OutboundMessage } from './adapter.js';
 
 // Mock container runner
 vi.mock('../container-runner.js', () => ({
@@ -84,7 +84,7 @@ describe('channel registry', () => {
   });
 
   it('should register and retrieve channel adapters', async () => {
-    const { registerChannelAdapter, getRegisteredChannelNames, getChannelContainerConfig } =
+    const { registerChannelAdapter, getRegisteredChannelNames, getChannelContainerContributions } =
       await import('./channel-registry.js');
 
     registerChannelAdapter('test-channel', {
@@ -95,9 +95,34 @@ describe('channel registry', () => {
     });
 
     expect(getRegisteredChannelNames()).toContain('test-channel');
-    expect(getChannelContainerConfig('test-channel')).toEqual({
+    expect(getChannelContainerContributions('ag-test')).toContainEqual({
       env: { TEST_KEY: 'value' },
     });
+  });
+
+  it('resolves dynamic container contributions for an agent group', async () => {
+    const { registerChannelAdapter, getChannelContainerContributions } = await import('./channel-registry.js');
+    registerChannelAdapter('dynamic-channel', {
+      factory: () => null,
+      containerConfig: ({ agentGroupId }) => ({ env: { TARGET_AGENT: agentGroupId } }),
+    });
+
+    expect(getChannelContainerContributions('ag-42')).toContainEqual({
+      env: { TARGET_AGENT: 'ag-42' },
+    });
+  });
+
+  it('normalizes platform addresses through the channel registration', async () => {
+    const { registerChannelAdapter, normalizeChannelPlatformId, sameChannelPlatformAddress } =
+      await import('./channel-registry.js');
+    registerChannelAdapter('resource-addressed', {
+      factory: () => null,
+      normalizePlatformId: (value) => value.split('/')[0]!,
+    });
+
+    expect(normalizeChannelPlatformId('resource-addressed', 'peer@example/device')).toBe('peer@example');
+    expect(sameChannelPlatformAddress('resource-addressed', 'peer@example/a', 'peer@example/b')).toBe(true);
+    expect(normalizeChannelPlatformId('plain', 'unchanged/value')).toBe('unchanged/value');
   });
 
   it('should skip adapters that return null (missing credentials)', async () => {
@@ -204,38 +229,34 @@ describe('channel registry — instance keying', () => {
     expect(reg.getChannelAdapter('slack')).toBe(tester);
 
     // The delivery bridge dispatches by exact key: a default-instance
-    // message (instance === channelType after backfill) throws the typed
-    // missing-adapter error (→ retry path, #2995), and is never delivered
-    // through the sibling's identity.
+    // message (instance === channelType after backfill) is deferred, not
+    // delivered through the sibling's identity.
     const bridge = reg.createChannelDeliveryAdapter();
-    let caught: unknown;
-    try {
-      await bridge.deliver(
-        'slack',
-        'slack:C1',
-        null,
-        'chat',
-        JSON.stringify({ text: 'to the default bot' }),
-        undefined,
-        'slack',
-      );
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(reg.MissingChannelAdapterError);
-    expect((caught as InstanceType<typeof reg.MissingChannelAdapterError>).channelType).toBe('slack');
+    await expect(
+      bridge.deliver({
+        channelType: 'slack',
+        platformId: 'slack:C1',
+        threadId: null,
+        kind: 'chat',
+        content: JSON.stringify({ text: 'to the default bot' }),
+        instance: 'slack',
+      }),
+    ).rejects.toMatchObject({
+      name: 'ChannelUnavailableError',
+      channelType: 'slack',
+      instance: 'slack',
+    });
     expect(tester.delivered).toHaveLength(0);
 
     // Sanity: the same bridge DOES deliver when the exact instance is live.
-    await bridge.deliver(
-      'slack',
-      'slack:C1',
-      null,
-      'chat',
-      JSON.stringify({ text: 'to the tester bot' }),
-      undefined,
-      'slack-tester',
-    );
+    await bridge.deliver({
+      channelType: 'slack',
+      platformId: 'slack:C1',
+      threadId: null,
+      kind: 'chat',
+      content: JSON.stringify({ text: 'to the tester bot' }),
+      instance: 'slack-tester',
+    });
     expect(tester.delivered).toHaveLength(1);
   });
 });
@@ -339,7 +360,7 @@ describe('channel + router integration', () => {
 
     // Set up delivery adapter bridge (same pattern as index.ts)
     setDeliveryAdapter({
-      async deliver(channelType, platformId, threadId, kind, content) {
+      async deliver({ channelType, platformId, threadId, kind, content }) {
         const adapter = getChannelAdapter(channelType);
         if (!adapter) return undefined;
         return adapter.deliver(platformId, threadId, { kind, content: JSON.parse(content) });

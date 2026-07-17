@@ -97,7 +97,13 @@ export async function armReasonCapture(approval: PendingApproval, session: Sessi
   }
 
   try {
-    await adapter.deliver(dm.channel_type, dm.platform_id, null, 'chat-sdk', JSON.stringify({ text: PROMPT_TEXT }));
+    await adapter.deliver({
+      channelType: dm.channel_type,
+      platformId: dm.platform_id,
+      threadId: null,
+      kind: 'chat-sdk',
+      content: JSON.stringify({ text: PROMPT_TEXT }),
+    });
   } catch (err) {
     log.error('reject-with-reason: reason prompt delivery failed, finalizing plain reject', {
       approvalId: approval.approval_id,

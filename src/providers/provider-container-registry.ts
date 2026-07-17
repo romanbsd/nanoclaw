@@ -1,3 +1,7 @@
+import type { ContainerContribution, VolumeMount } from '../container-contribution.js';
+
+export type { VolumeMount } from '../container-contribution.js';
+
 /**
  * Host-side provider container-config registry.
  *
@@ -15,12 +19,6 @@
  * with a top-level `registerProviderContainerConfig(...)` call, then appending
  * `import './<name>.js';` to `src/providers/index.ts` (the barrel).
  */
-
-export interface VolumeMount {
-  hostPath: string;
-  containerPath: string;
-  readonly: boolean;
-}
 
 export interface ProviderContainerContext {
   /** Per-session host directory: `<DATA_DIR>/v2-sessions/<session_id>`. */
@@ -44,12 +42,7 @@ export interface ProviderContainerContext {
   hostEnv: NodeJS.ProcessEnv;
 }
 
-export interface ProviderContainerContribution {
-  /** Extra volume mounts (merged with the default session/group/agent-runner mounts). */
-  mounts?: VolumeMount[];
-  /** Extra env vars to pass to the container (`-e KEY=VALUE`). */
-  env?: Record<string, string>;
-}
+export type ProviderContainerContribution = ContainerContribution;
 
 /**
  * Static capabilities a provider declares at registration time — knowable

@@ -18,6 +18,7 @@ export interface DestinationEntry {
   type: 'channel' | 'agent';
   channelType?: string;
   platformId?: string;
+  platformKey?: string;
   agentGroupId?: string;
 }
 
@@ -29,6 +30,7 @@ interface DestRow {
   type: 'channel' | 'agent';
   channel_type: string | null;
   platform_id: string | null;
+  platform_key: string | null;
   agent_group_id: string | null;
 }
 
@@ -39,6 +41,7 @@ function rowToEntry(row: DestRow): DestinationEntry {
     type: row.type,
     channelType: row.channel_type ?? undefined,
     platformId: row.platform_id ?? undefined,
+    platformKey: row.platform_key ?? undefined,
     agentGroupId: row.agent_group_id ?? undefined,
   };
 }
@@ -60,17 +63,22 @@ export function findByName(name: string): DestinationEntry | undefined {
 export function findByRouting(
   channelType: string | null | undefined,
   platformId: string | null | undefined,
+  platformKey?: string | null,
 ): DestinationEntry | undefined {
   if (!channelType || !platformId) return undefined;
   const db = getInboundDb();
   const row =
     channelType === 'agent'
-      ? (db
-          .prepare("SELECT * FROM destinations WHERE type = 'agent' AND agent_group_id = ?")
-          .get(platformId) as DestRow | undefined)
+      ? (db.prepare("SELECT * FROM destinations WHERE type = 'agent' AND agent_group_id = ?").get(platformId) as
+          | DestRow
+          | undefined)
       : (db
-          .prepare("SELECT * FROM destinations WHERE type = 'channel' AND channel_type = ? AND platform_id = ?")
-          .get(channelType, platformId) as DestRow | undefined);
+          .prepare(
+            `SELECT * FROM destinations
+              WHERE type = 'channel' AND channel_type = ?
+                AND (platform_id = ? OR (? IS NOT NULL AND platform_key = ?))`,
+          )
+          .get(channelType, platformId, platformKey ?? null, platformKey ?? null) as DestRow | undefined);
   return row ? rowToEntry(row) : undefined;
 }
 
@@ -85,10 +93,19 @@ export function buildSystemPromptAddendum(assistantName?: string, mode: SessionM
   const sections: string[] = [];
 
   if (assistantName) {
-    sections.push(['# You are ' + assistantName, '', `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`].join('\n'));
+    sections.push(
+      [
+        '# You are ' + assistantName,
+        '',
+        `Your name is **${assistantName}**. Use it when the channel asks who you are, when introducing yourself, and when signing any message that explicitly calls for a signature.`,
+      ].join('\n'),
+    );
   }
 
   sections.push(buildDestinationsSection(mode));
+
+  const contributed = process.env.NANOCLAW_SYSTEM_PROMPT_ADDENDUM?.trim();
+  if (contributed) sections.push(contributed);
 
   return sections.join('\n\n');
 }
@@ -96,10 +113,8 @@ export function buildSystemPromptAddendum(assistantName?: string, mode: SessionM
 function buildDestinationsSection(mode: SessionMode): string {
   const all = getAllDestinations();
   const lines = ['## Sending messages', ''];
-
   if (all.length === 0) {
-    lines.push('You currently have no configured destinations. You cannot send messages until an admin wires one up.');
-    if (mode.kind === 'chat') return lines.join('\n');
+    lines.push('You currently have no configured human destinations.');
   } else if (all.length === 1) {
     const d = all[0];
     lines.push(`Your destination is \`${d.name}\`${destinationLabel(d)}.`);
@@ -109,7 +124,6 @@ function buildDestinationsSection(mode: SessionMode): string {
       lines.push(`- \`${d.name}\`${destinationLabel(d)}`);
     }
   }
-
   lines.push('');
 
   if (mode.kind === 'task') {
@@ -121,22 +135,39 @@ function buildDestinationsSection(mode: SessionMode): string {
     return lines.join('\n');
   }
 
-  lines.push(
-    'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
-  );
-  lines.push('');
-  lines.push(
-    'When replying to an incoming message, default to addressing the destination it came `from` (every inbound `<message>` tag carries a `from="name"` attribute). Pick a different destination when the request asks for it (e.g., "tell Laura that…").',
-  );
-  lines.push('');
-  lines.push(
-    'The `send_message` MCP tool is the same delivery, available mid-turn — handy for a quick acknowledgment ("on it") before a slow tool call. Always pass its explicit `to` destination. Each `send_message` call and each final-response `<message>` block lands as its own message in the conversation, so they read as a sequence rather than as one combined reply.',
-  );
-  lines.push('');
-  lines.push(
-    'For a short turn, do not narrate. For longer work, send one acknowledgment and then updates only at meaningful milestones, especially before slow operations. Never narrate micro-steps; finish with the outcome, not a play-by-play.',
-  );
+  if (all.length > 0) {
+    lines.push(
+      'Wrap each delivered message in a `<message to="name">…</message>` block; include several blocks in one response to address several destinations. `<internal>…</internal>` marks thinking you don\'t want sent.',
+    );
+  }
+  if (all.length > 0) {
+    lines.push('');
+    lines.push(
+      'When replying to an incoming message, default to addressing the destination it came `from` (every inbound `<message>` tag carries a `from="name"` attribute). Pick a different destination when the request asks for it (e.g., "tell Laura that…").',
+    );
+    if (toolEnabled('send_message')) {
+      lines.push('');
+      lines.push(
+        'The `send_message` MCP tool is the same delivery, available mid-turn — handy for a quick acknowledgment ("on it") before a slow tool call. Always pass its explicit `to` destination. Each `send_message` call and each final-response `<message>` block lands as its own message in the conversation, so they read as a sequence rather than as one combined reply.',
+      );
+    }
+    lines.push('');
+    lines.push(
+      'For a short turn, do not narrate. For longer work, send one acknowledgment and then updates only at meaningful milestones, especially before slow operations. Never narrate micro-steps; finish with the outcome, not a play-by-play.',
+    );
+  }
   return lines.join('\n');
+}
+
+function toolEnabled(name: string): boolean {
+  const configured = process.env.NANOCLAW_MCP_TOOL_ALLOWLIST;
+  return (
+    !configured ||
+    configured
+      .split(',')
+      .map((item) => item.trim())
+      .includes(name)
+  );
 }
 
 function destinationLabel(d: DestinationEntry): string {

@@ -225,6 +225,7 @@ function createAdapter(): ChannelAdapter {
         channelType: to.channelType,
         platformId: to.platformId,
         threadId: to.threadId,
+        instance: to.instance,
         message: {
           id: `cli-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           kind: 'chat',
@@ -278,6 +279,7 @@ function createAdapter(): ChannelAdapter {
       channelType: obj.channelType,
       platformId: obj.platformId,
       threadId,
+      instance: typeof obj.instance === 'string' ? obj.instance : undefined,
     };
   }
 

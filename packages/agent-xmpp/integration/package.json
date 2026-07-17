@@ -1,0 +1,22 @@
+{
+  "name": "@agent-xmpp/integration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e:embedded": "tsx e2e-embedded-gateway.ts",
+    "bootstrap": "tsx bootstrap-openfire.ts",
+    "demo:local-agents": "tsx run-local-agents-demo.ts"
+  },
+  "dependencies": {
+    "@agent-xmpp/gateway": "workspace:*",
+    "@agent-xmpp/protocol": "workspace:*",
+    "@xmpp/client": "0.14.0",
+    "@xmpp/xml": "0.14.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.23.0",
+    "typescript": "^5.7.0"
+  }
+}

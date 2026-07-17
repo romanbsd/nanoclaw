@@ -271,7 +271,7 @@ describe('poll loop integration', () => {
     await loopPromise.catch(() => {});
   });
 
-  it('handles mixed task + chat batch with correct origin metadata', async () => {
+  it('keeps a mixed task + chat batch on the task-owned return path', async () => {
     // Seed destination for routing lookup
     insertMessage('m-chat', { sender: 'Alice', text: 'check this' }, { platformId: 'chan-1', channelType: 'discord' });
     // Task with same routing — simulates a scheduled task in a channel session
@@ -291,7 +291,9 @@ describe('poll loop integration', () => {
 
     const out = getUndeliveredMessages();
     expect(out).toHaveLength(1);
-    expect(out[0].platform_id).toBe('chan-1');
+    expect(out[0].kind).toBe('task_log');
+    expect(out[0].platform_id).toBeNull();
+    expect(JSON.parse(out[0].content).text).toBe('[undelivered → discord-test] done');
 
     await loopPromise.catch(() => {});
   });

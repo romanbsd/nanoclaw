@@ -257,6 +257,14 @@ describe('messaging group agents', () => {
     expect(getDestinations('ag-1')).toHaveLength(1);
   });
 
+  it('can create a transport wiring without projecting a destination', async () => {
+    const { getDestinations } = await import('../modules/agent-to-agent/db/agent-destinations.js');
+    createMessagingGroupAgent(mga(), { createDestination: false });
+
+    expect(getMessagingGroupAgents('mg-1')).toHaveLength(1);
+    expect(getDestinations('ag-1')).toHaveLength(0);
+  });
+
   it('does not duplicate destination row on re-wiring', async () => {
     const { getDestinations } = await import('../modules/agent-to-agent/db/agent-destinations.js');
     createMessagingGroupAgent(mga());

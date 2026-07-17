@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 
 import { initTestSessionDb, closeSessionDb, getInboundDb } from './db/connection.js';
 import { getPendingMessages } from './db/messages-in.js';
-import { formatMessages, stripInternalTags, stripLegacyTaskContract } from './formatter.js';
+import { extractRouting, formatMessages, stripInternalTags, stripLegacyTaskContract } from './formatter.js';
 import { TIMEZONE, formatLocalTime } from './timezone.js';
 
 beforeEach(() => {
@@ -24,12 +24,7 @@ afterEach(() => {
   closeSessionDb();
 });
 
-function insertMessage(
-  id: string,
-  kind: string,
-  content: object,
-  opts?: { timestamp?: string },
-) {
+function insertMessage(id: string, kind: string, content: object, opts?: { timestamp?: string }) {
   const timestamp = opts?.timestamp ?? new Date().toISOString();
   getInboundDb()
     .prepare(
@@ -147,6 +142,47 @@ describe('task timestamps', () => {
     const result = formatMessages(getPendingMessages());
     expect(result).toContain(`time="${formatLocalTime('2026-01-05T12:00:00.000Z', TIMEZONE)}"`);
   });
+
+  it('includes structured remote task arguments and schemas', () => {
+    insertMessage('t1', 'agent-task', {
+      prompt: 'Execute registered operation conversation.respond.',
+      task: {
+        taskId: 'task-1',
+        operation: 'conversation.respond',
+        arguments: { message: 'How are you?' },
+      },
+      event: 'task_invoke',
+      payload: {
+        operation: {
+          outputSchema: {
+            type: 'object',
+            properties: { response: { type: 'string' } },
+            required: ['response'],
+          },
+        },
+      },
+    });
+
+    const result = formatMessages(getPendingMessages());
+    expect(result).toContain('Task data:');
+    expect(result).toContain('"taskId": "task-1"');
+    expect(result).toContain('"message": "How are you?"');
+    expect(result).toContain('"response"');
+    expect(result.match(/Execute registered operation/g)?.length).toBe(1);
+  });
+
+  it('derives result ownership from the explicit message kind', () => {
+    insertMessage('t1', 'agent-task', { prompt: 'Execute a remote request.' });
+
+    expect(extractRouting(getPendingMessages()).responsePolicy).toBe('action');
+  });
+
+  it('never routes a mixed batch containing an agent task to a channel', () => {
+    insertMessage('m1', 'chat', { sender: 'Alice', text: 'Hello' });
+    insertMessage('t1', 'agent-task', { prompt: 'Execute a remote request.' });
+
+    expect(extractRouting(getPendingMessages()).responsePolicy).toBe('action');
+  });
 });
 
 describe('reply_to + quoted_message rendering', () => {
@@ -211,9 +247,7 @@ describe('stripInternalTags', () => {
   });
 
   it('strips multi-line internal tags', () => {
-    expect(stripInternalTags('hello <internal>\nsecret\nstuff\n</internal> world')).toBe(
-      'hello  world',
-    );
+    expect(stripInternalTags('hello <internal>\nsecret\nstuff\n</internal> world')).toBe('hello  world');
   });
 
   it('strips multiple internal tag blocks', () => {
@@ -229,8 +263,6 @@ describe('stripInternalTags', () => {
   });
 
   it('preserves content that surrounds internal tags', () => {
-    expect(stripInternalTags('<internal>thinking</internal>The answer is 42')).toBe(
-      'The answer is 42',
-    );
+    expect(stripInternalTags('<internal>thinking</internal>The answer is 42')).toBe('The answer is 42');
   });
 });
