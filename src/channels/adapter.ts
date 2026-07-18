@@ -4,8 +4,6 @@
  * Channel adapters bridge NanoClaw with messaging platforms (Discord, Slack, etc.).
  * Two patterns: native adapters (implement directly) or Chat SDK bridge (wrap a Chat SDK adapter).
  */
-import type { ContainerContribution } from '../container-contribution.js';
-
 /** Passed to the adapter at setup time. */
 export interface ChannelSetup {
   /** Called when an inbound message arrives from the platform. */
@@ -260,12 +258,6 @@ export interface ChannelAdapter {
 /** Factory function that creates a channel adapter (returns null if credentials missing). */
 export type ChannelAdapterFactory = () => ChannelAdapter | Promise<ChannelAdapter> | null;
 
-export type ChannelContainerContribution = ContainerContribution;
-
-export type ChannelContainerConfig =
-  | ChannelContainerContribution
-  | ((context: { agentGroupId: string }) => ChannelContainerContribution | undefined);
-
 /** Registration entry for a channel adapter. */
 export interface ChannelRegistration {
   factory: ChannelAdapterFactory;
@@ -279,5 +271,4 @@ export interface ChannelRegistration {
    * modules pass the same const here and to the adapter/bridge.
    */
   defaults?: ChannelDefaults;
-  containerConfig?: ChannelContainerConfig;
 }

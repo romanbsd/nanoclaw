@@ -12,9 +12,9 @@ import {
 } from '@agent-xmpp/protocol';
 import type { ParsedTaskInvocation, TaskWireEvent } from '@agent-xmpp/gateway';
 
+import { deliverAgentInbound } from '../../agent-inbound/index.js';
 import { getAgentGroupByXmppJid, getXmppAgentIdentity } from './identity.js';
 import { getOrchestratorAgentByGroupId } from './orchestrator-store.js';
-import { writeSessionMessage } from '../../session-manager.js';
 import type { Session } from '../../types.js';
 import { validateJson } from './schema.js';
 import { endpointDescriptor, XmppAgentGatewayStore } from './store.js';
@@ -32,10 +32,10 @@ export class XmppAgentGatewayService {
     try {
       const result = await this.execute(request, session);
       if (result !== DEFERRED)
-        this.respond(session, request.requestId, { requestId: request.requestId, ok: true, result });
+        await this.respond(session, request.requestId, { requestId: request.requestId, ok: true, result });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      this.respond(session, request.requestId, {
+      await this.respond(session, request.requestId, {
         requestId: request.requestId,
         ok: false,
         error: { code: classifyError(message), message },
@@ -111,7 +111,7 @@ export class XmppAgentGatewayService {
     }
     if (event.type === 'input_required') {
       const input = this.requireInput(task, event.payload);
-      this.respondToWaiters(input.task, {
+      await this.respondToWaiters(input.task, {
         requestId: task.correlationId,
         ok: true,
         result: {
@@ -126,13 +126,17 @@ export class XmppAgentGatewayService {
     }
     if (event.type === 'completed') {
       const completed = this.completeTask(task, event.payload.result, optionalString(event.payload.summary));
-      this.respondToWaiters(completed, { requestId: completed.correlationId, ok: true, result: taskResult(completed) });
+      await this.respondToWaiters(completed, {
+        requestId: completed.correlationId,
+        ok: true,
+        result: taskResult(completed),
+      });
       return;
     }
     if (event.type === 'failed') {
       const error = (event.payload.error ?? event.payload) as AgentTaskError;
       const failed = this.failTask(task, error);
-      this.respondToWaiters(failed, {
+      await this.respondToWaiters(failed, {
         requestId: failed.correlationId,
         ok: false,
         error: { code: error.code ?? 'execution-failed', message: error.message ?? 'Task failed' },
@@ -140,7 +144,7 @@ export class XmppAgentGatewayService {
       return;
     }
     const cancelled = this.cancelTask(task);
-    this.respondToWaiters(cancelled, {
+    await this.respondToWaiters(cancelled, {
       requestId: cancelled.correlationId,
       ok: true,
       result: { taskId: cancelled.taskId, status: cancelled.state },
@@ -441,23 +445,27 @@ export class XmppAgentGatewayService {
     return depth;
   }
 
-  private respond(session: Session, requestId: string, response: GatewayMailboxResponse): void {
-    writeSessionMessage(session.agent_group_id, session.id, {
-      id: `gateway-response-${randomUUID()}`,
-      kind: 'system',
-      timestamp: new Date().toISOString(),
-      platformId: null,
-      channelType: null,
-      threadId: null,
-      content: JSON.stringify({ action: 'xmpp_agent_gateway_response', requestId, response }),
-      trigger: 0,
+  private async respond(session: Session, requestId: string, response: GatewayMailboxResponse): Promise<void> {
+    await deliverAgentInbound({
+      session,
+      wake: false,
+      message: {
+        id: `gateway-response-${randomUUID()}`,
+        kind: 'system',
+        timestamp: new Date().toISOString(),
+        platformId: null,
+        channelType: null,
+        threadId: null,
+        content: JSON.stringify({ action: 'xmpp_agent_gateway_response', requestId, response }),
+        trigger: 0,
+      },
     });
   }
 
-  private respondToWaiters(task: AgentTaskRecord, response: GatewayMailboxResponse): boolean {
+  private async respondToWaiters(task: AgentTaskRecord, response: GatewayMailboxResponse): Promise<boolean> {
     const waiters = this.store.takeTaskWaiters(task.taskId);
     for (const waiter of waiters) {
-      this.respond({ id: waiter.sessionId, agent_group_id: waiter.agentGroupId } as Session, waiter.requestId, {
+      await this.respond({ id: waiter.sessionId, agent_group_id: waiter.agentGroupId } as Session, waiter.requestId, {
         ...response,
         requestId: waiter.requestId,
       });
@@ -478,7 +486,7 @@ export class XmppAgentGatewayService {
       | { ok: false; error: { code: string; message: string } },
     remotePayload: Record<string, unknown>,
   ): Promise<void> {
-    const notified = this.respondToWaiters(task, { requestId: task.correlationId, ...localResult });
+    const notified = await this.respondToWaiters(task, { requestId: task.correlationId, ...localResult });
     if (!notified) await this.emitRemoteEvent(task, wireType, remotePayload);
   }
 

@@ -16,8 +16,9 @@
  */
 import path from 'path';
 
+import { allocateAgentGroupFolder } from '../../agent-group-lifecycle.js';
 import { GROUPS_DIR } from '../../config.js';
-import { createAgentGroup, getAgentGroup, getAgentGroupByFolder } from '../../db/agent-groups.js';
+import { createAgentGroup, getAgentGroup } from '../../db/agent-groups.js';
 import { getContainerConfig } from '../../db/container-configs.js';
 import { getSession } from '../../db/sessions.js';
 import { wakeContainer } from '../../container-runner.js';
@@ -111,12 +112,7 @@ async function performCreateAgent(
   }
 
   // Derive a safe folder name, deduplicated globally across agent_groups.folder
-  let folder = localName;
-  let suffix = 2;
-  while (getAgentGroupByFolder(folder)) {
-    folder = `${localName}-${suffix}`;
-    suffix++;
-  }
+  const folder = allocateAgentGroupFolder(localName);
 
   const groupPath = path.join(GROUPS_DIR, folder);
   const resolvedPath = path.resolve(groupPath);

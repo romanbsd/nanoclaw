@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { resolveContainerContributions } from '../container-contribution.js';
 import { closeDb, createAgentGroup, getDb, initTestDb, runMigrations } from '../db/index.js';
 import { createXmppAgentIdentity } from '../modules/xmpp-agent-gateway/identity.js';
 import { createOrchestratorAgent } from '../modules/xmpp-agent-gateway/orchestrator-store.js';
-import { getChannelContainerContributions, getRegisteredChannelNames } from './channel-registry.js';
+import { getRegisteredChannelNames } from './channel-registry.js';
 
 // Import real barrel so registration side effects run.
 import './index.js';
@@ -31,7 +32,7 @@ describe('xmpp bridge registration', () => {
       created_at: new Date().toISOString(),
     });
 
-    const contribution = getChannelContainerContributions('ag-xmpp').find(
+    const contribution = resolveContainerContributions({ agentGroupId: 'ag-xmpp' }).find(
       (candidate) => candidate.env?.XMPP_AGENT_JID === 'agent@example.org',
     );
     expect(contribution?.promptAddendum).toContain('agents.discover_endpoints');
@@ -62,7 +63,7 @@ describe('xmpp bridge registration', () => {
       created_at: new Date().toISOString(),
     });
 
-    expect(getChannelContainerContributions('ag-orchestrated')).toContainEqual(
+    expect(resolveContainerContributions({ agentGroupId: 'ag-orchestrated' })).toContainEqual(
       expect.objectContaining({
         env: { XMPP_AGENT_JID: 'orchestrated@example.org' },
         blockedHosts: ['one.test', 'two.test'],

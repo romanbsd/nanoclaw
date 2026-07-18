@@ -82,14 +82,8 @@ export function buildBridgePayload(
     replyTo: isGroup ? undefined : from,
     threadId,
     agentJid,
-    message: {
-      id: agentMsg.id,
-      kind: 'chat',
-      content: { text: bodyText, agentMessage: agentMsg },
-      timestamp: envelope.delivery.receivedAt,
-      isMention,
-      isGroup,
-    },
+    isMention,
+    isGroup,
     envelope,
   };
 }

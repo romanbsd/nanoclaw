@@ -35,7 +35,29 @@ run_pnpm() {
   fi
 }
 
+require_opencode_provider() {
+  local missing=0
+  for path in \
+    src/providers/opencode.ts \
+    container/agent-runner/src/providers/opencode.ts \
+    container/agent-runner/src/providers/mcp-to-opencode.ts; do
+    if [[ ! -f "$path" ]]; then
+      echo "[demo] missing OpenCode provider file: $path" >&2
+      missing=1
+    fi
+  done
+  grep -q "import './opencode.js';" src/providers/index.ts || missing=1
+  grep -q "import './opencode.js';" container/agent-runner/src/providers/index.ts || missing=1
+  grep -q '"@opencode-ai/sdk"' container/agent-runner/package.json || missing=1
+  grep -q '"name": "opencode-ai"' container/cli-tools.json || missing=1
+  if [[ "$missing" -ne 0 ]]; then
+    echo "[demo] OpenCode is an optional provider. Apply /add-opencode before running the Rapid-MLX demo." >&2
+    exit 1
+  fi
+}
+
 echo "[demo] Node $($NODE26 --version)"
+require_opencode_provider
 echo "[demo] building host and XMPP packages"
 run_pnpm run build
 

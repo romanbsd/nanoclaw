@@ -32,14 +32,8 @@ const payload: BridgeInboundPayload = {
   platformId: 'roman@example.com',
   threadId: 'thread_1',
   agentJid: 'planner@agents.example',
-  message: {
-    id: 'msg_01',
-    kind: 'chat',
-    content: { text: 'fallback' },
-    timestamp: '2026-07-03T20:10:00Z',
-    isMention: true,
-    isGroup: false,
-  },
+  isMention: true,
+  isGroup: false,
   envelope,
 };
 
@@ -114,7 +108,8 @@ describe('nanoclawInboundFromBridge', () => {
   it('forwards mention and group flags', () => {
     const inbound = nanoclawInboundFromBridge({
       ...payload,
-      message: { ...payload.message, isMention: false, isGroup: true },
+      isMention: false,
+      isGroup: true,
     });
     expect(inbound.isMention).toBe(false);
     expect(inbound.isGroup).toBe(true);

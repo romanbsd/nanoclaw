@@ -302,6 +302,7 @@ async function provisionAgent(agent: DemoAgent): Promise<ProvisionedAgent> {
 
 async function waitForAgentReply(client: XmppSession, agent: ProvisionedAgent): Promise<string> {
   const deadline = Date.now() + 10 * 60_000;
+  const threadId = `demo-smoke-${agent.id}`;
   let attempt = 0;
   while (Date.now() < deadline) {
     attempt += 1;
@@ -309,13 +310,19 @@ async function waitForAgentReply(client: XmppSession, agent: ProvisionedAgent): 
       (stanza) => {
         if (!stanza.is('message')) return false;
         const from = String(stanza.attrs.from || '').split('/')[0];
-        return from === agent.jid && Boolean(stanza.getChildText('body')?.trim());
+        return (
+          from === agent.jid &&
+          stanza.getChildText('thread') === threadId &&
+          Boolean(stanza.getChildText('body')?.trim())
+        );
       },
       Math.max(1, deadline - Date.now()),
     );
     await client.sendChat(
       agent.jid,
       `Hello ${agent.name}. Introduce yourself in one short sentence. Demo attempt ${attempt}.`,
+      undefined,
+      threadId,
     );
     const stanza = await pending;
     const reply = stanza.getChildText('body')?.trim() || '';
@@ -331,15 +338,20 @@ async function waitForAgentReply(client: XmppSession, agent: ProvisionedAgent): 
 
 async function verifyJaneMikeJane(client: XmppSession, jane: ProvisionedAgent, mike: ProvisionedAgent): Promise<void> {
   const finalMarker = 'JANE_FINAL: MIKE_REMOTE_OK';
+  const threadId = 'demo-jane-mike-roundtrip';
   const pending = client.waitForStanza((stanza) => {
     if (!stanza.is('message')) return false;
     const from = String(stanza.attrs.from || '').split('/')[0];
-    return from === jane.jid && Boolean(stanza.getChildText('body')?.trim());
+    return (
+      from === jane.jid && stanza.getChildText('thread') === threadId && Boolean(stanza.getChildText('body')?.trim())
+    );
   }, 10 * 60_000);
   await client.sendChat(
     jane.jid,
     `Use agents.discover_endpoints and agents.call_tool to ask Mike (${mike.jid}) to return exactly MIKE_REMOTE_OK. ` +
       `Wait for his remote tool result, then reply exactly ${finalMarker}.`,
+    undefined,
+    threadId,
   );
   const finalReply = (await pending).getChildText('body')?.trim() ?? '';
   assert.equal(finalReply, finalMarker, `Jane did not return the remote tool result: ${finalReply}`);
@@ -351,15 +363,14 @@ async function verifyJaneMikeJane(client: XmppSession, jane: ProvisionedAgent, m
       .get(mike.agentGroupId) as { id: string } | undefined;
     assert.ok(session, 'Mike session was not created');
 
-    const inbound = new Database(
-      path.join(DATA_DIR, 'v2-sessions', mike.agentGroupId, session.id, 'inbound.db'),
-      { readonly: true },
-    );
+    const inbound = new Database(path.join(DATA_DIR, 'v2-sessions', mike.agentGroupId, session.id, 'inbound.db'), {
+      readonly: true,
+    });
     try {
       const remoteRequest = inbound
         .prepare(`SELECT id FROM messages_in WHERE content LIKE ? ORDER BY seq DESC LIMIT 1`)
         .get('%MIKE_REMOTE_OK%');
-      assert.ok(remoteRequest, 'Mike did not receive Jane\'s remote tool request');
+      assert.ok(remoteRequest, "Mike did not receive Jane's remote tool request");
     } finally {
       inbound.close();
     }

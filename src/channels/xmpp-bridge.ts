@@ -13,7 +13,6 @@ import {
 import { getAskQuestionRender } from '../db/sessions.js';
 import { log } from '../log.js';
 import '../modules/xmpp-agent-gateway/index.js';
-import { getXmppContainerContribution } from '../modules/xmpp-agent-gateway/container-contribution.js';
 import { XmppAgentGatewayStore } from '../modules/xmpp-agent-gateway/store.js';
 import { XmppAgentGatewayService } from '../modules/xmpp-agent-gateway/service.js';
 import { getOrchestratorAgentByGroupId } from '../modules/xmpp-agent-gateway/orchestrator-store.js';
@@ -197,5 +196,4 @@ function createAdapter(): ChannelAdapter | null {
 registerChannelAdapter('xmpp', {
   factory: createAdapter,
   normalizePlatformId: bareJid,
-  containerConfig: ({ agentGroupId }) => getXmppContainerContribution(agentGroupId),
 });

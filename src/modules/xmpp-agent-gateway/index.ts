@@ -1,30 +1,16 @@
-import type { GatewayMailboxRequest } from '@agent-xmpp/protocol';
+import { GATEWAY_ACTIONS, type GatewayMailboxRequest } from '@agent-xmpp/protocol';
 
+import { registerContainerContributor } from '../../container-contribution.js';
 import { registerDeliveryAction } from '../../delivery.js';
 import { unguarded } from '../../guard/index.js';
+import { getXmppContainerContribution } from './container-contribution.js';
 import { XmppAgentGatewayService } from './service.js';
 
 const service = new XmppAgentGatewayService();
 
-const actions: GatewayMailboxRequest['action'][] = [
-  'agent_api.register',
-  'agents.discover_endpoints',
-  'agents.describe_endpoint',
-  'agents.list_tools',
-  'agents.start_tool',
-  'agents.call_tool',
-  'agents.get_task',
-  'agents.get_result',
-  'agents.cancel_task',
-  'agents.answer_input',
-  'task.report_progress',
-  'task.request_input',
-  'task.complete',
-  'task.fail',
-  'task.cancelled',
-];
+registerContainerContributor('xmpp-agent-gateway', ({ agentGroupId }) => getXmppContainerContribution(agentGroupId));
 
-for (const action of actions) {
+for (const action of GATEWAY_ACTIONS) {
   registerDeliveryAction(
     action,
     async (content, session) => {

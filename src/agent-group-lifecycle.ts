@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
-import { createAgentGroup, deleteAgentGroup } from './db/agent-groups.js';
+import { createAgentGroup, deleteAgentGroup, getAgentGroupByFolder } from './db/agent-groups.js';
 import { deleteContainerConfig } from './db/container-configs.js';
 import { getDb, hasTable } from './db/connection.js';
 import { initGroupFilesystem } from './group-init.js';
@@ -37,6 +37,15 @@ export function provisionAgentGroup(
     removeAgentGroupFiles(group);
     throw err;
   }
+}
+
+/** Allocate a globally unique folder from an already-sanitized base name. */
+export function allocateAgentGroupFolder(baseName: string, fallback = 'agent'): string {
+  const base = baseName || fallback;
+  let folder = base;
+  let suffix = 2;
+  while (getAgentGroupByFolder(folder)) folder = `${base}-${suffix++}`;
+  return folder;
 }
 
 /** FK-ordered deletion shared by CLI and integration-owned agent lifecycles. */

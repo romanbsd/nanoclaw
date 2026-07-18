@@ -431,7 +431,7 @@ async function main(): Promise<void> {
     await mailbox.waitForInbound(4);
     assert.equal(mailbox.inbound[3].agentJid, agents[1].manifest.agent.jid);
     assert.equal(mailbox.inbound[3].platformId, agents[0].manifest.agent.jid);
-    assert.equal(mailbox.inbound[3].message.content.text, 'alpha to beta');
+    assert.equal(mailbox.inbound[3].envelope.message.body, 'alpha to beta');
     reporter.pass();
 
     reporter.start('Complete the remote task lifecycle');

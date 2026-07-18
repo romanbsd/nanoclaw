@@ -46,11 +46,11 @@
  */
 import { normalizeOptions, type NormalizedOption, type RawOption } from '../../channels/ask-question.js';
 import { resolveWiringDefaults } from '../../channels/channel-defaults.js';
-import { createAgentGroup, getAgentGroup, getAgentGroupByFolder, getAllAgentGroups } from '../../db/agent-groups.js';
+import { allocateAgentGroupFolder, provisionAgentGroup } from '../../agent-group-lifecycle.js';
+import { getAgentGroup, getAllAgentGroups } from '../../db/agent-groups.js';
 import { getChannelAdapter } from '../../channels/channel-registry.js';
 import { getMessagingGroup, updateMessagingGroup } from '../../db/messaging-groups.js';
 import { getDeliveryAdapter } from '../../delivery.js';
-import { initGroupFilesystem } from '../../group-init.js';
 import { log } from '../../log.js';
 import type { InboundEvent } from '../../channels/adapter.js';
 import type { AgentGroup } from '../../types.js';
@@ -313,28 +313,19 @@ export function buildAgentSelectionOptions(
  * folder-name collisions with numeric suffixes.
  */
 export function createNewAgentGroup(name: string): AgentGroup {
-  let folder = toFolder(name);
-  const baseFolder = folder;
-  let suffix = 2;
-  while (getAgentGroupByFolder(folder)) {
-    folder = `${baseFolder}-${suffix}`;
-    suffix++;
-  }
+  const folder = allocateAgentGroupFolder(toFolder(name), 'unnamed');
 
   const agId = `ag-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  createAgentGroup({
+  const agentGroup: AgentGroup = {
     id: agId,
     name,
     folder,
     agent_provider: null,
     created_at: new Date().toISOString(),
-  });
-
-  const ag = getAgentGroup(agId)!;
+  };
   // Channel-approved groups are created on the instance default provider
   // (DEFAULT_AGENT_PROVIDER, or claude when unset) — initGroupFilesystem stamps
   // it onto the fresh config row. The operator flips a group afterward with
   // `ncl groups config update --provider`.
-  initGroupFilesystem(ag);
-  return ag;
+  return provisionAgentGroup(agentGroup);
 }

@@ -78,24 +78,29 @@ export type AgentTaskEvent =
   | { type: 'cancel_requested'; taskId: string; reason?: string }
   | { type: 'cancelled'; taskId: string };
 
+export const GATEWAY_ACTIONS = [
+  'agent_api.register',
+  'agents.discover_endpoints',
+  'agents.describe_endpoint',
+  'agents.list_tools',
+  'agents.start_tool',
+  'agents.call_tool',
+  'agents.get_task',
+  'agents.get_result',
+  'agents.cancel_task',
+  'agents.answer_input',
+  'task.report_progress',
+  'task.request_input',
+  'task.complete',
+  'task.fail',
+  'task.cancelled',
+] as const;
+
+export type GatewayAction = (typeof GATEWAY_ACTIONS)[number];
+
 export interface GatewayMailboxRequest {
   requestId: string;
-  action:
-    | 'agent_api.register'
-    | 'agents.discover_endpoints'
-    | 'agents.describe_endpoint'
-    | 'agents.list_tools'
-    | 'agents.start_tool'
-    | 'agents.call_tool'
-    | 'agents.get_task'
-    | 'agents.get_result'
-    | 'agents.cancel_task'
-    | 'agents.answer_input'
-    | 'task.report_progress'
-    | 'task.request_input'
-    | 'task.complete'
-    | 'task.fail'
-    | 'task.cancelled';
+  action: GatewayAction;
   payload: Record<string, unknown>;
 }
 

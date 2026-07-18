@@ -6,7 +6,6 @@
  */
 import {
   type ChannelAdapter,
-  type ChannelContainerContribution,
   type ChannelDefaults,
   type ChannelRegistration,
   type ChannelSetup,
@@ -236,17 +235,6 @@ export function sameChannelPlatformAddress(channelType: string, left: string, ri
 }
 
 /** Resolve every installed channel's optional per-agent container contribution. */
-export function getChannelContainerContributions(agentGroupId: string): ChannelContainerContribution[] {
-  const contributions: ChannelContainerContribution[] = [];
-  for (const registration of registry.values()) {
-    const declaration = registration.containerConfig;
-    if (!declaration) continue;
-    const contribution = typeof declaration === 'function' ? declaration({ agentGroupId }) : declaration;
-    if (contribution) contributions.push(contribution);
-  }
-  return contributions;
-}
-
 /**
  * Instantiate and set up all registered channel adapters.
  * Skips adapters that return null (missing credentials).

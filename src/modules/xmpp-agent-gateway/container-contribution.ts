@@ -23,7 +23,7 @@ export function getXmppContainerContribution(agentGroupId: string): ContainerCon
     spawnEnv.BLOCKED_HOSTS?.split(',')
       .map((host) => host.trim())
       .filter(Boolean) ?? [];
-  const env = Object.fromEntries(Object.entries(spawnEnv).filter(([key, value]) => key !== 'BLOCKED_HOSTS' && value));
+  const env = Object.fromEntries(Object.entries(spawnEnv).filter(([key]) => key !== 'BLOCKED_HOSTS'));
   return {
     env,
     blockedHosts,

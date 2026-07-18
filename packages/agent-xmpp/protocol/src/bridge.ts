@@ -42,10 +42,10 @@ export interface NanoclawXmppInbound {
 }
 
 export function nanoclawInboundFromBridge(payload: BridgeInboundPayload): NanoclawXmppInbound {
-  const { envelope, message } = payload;
+  const { envelope } = payload;
   const text = agentMessageText(envelope.message);
   return {
-    id: message.id,
+    id: envelope.message.id,
     // Generic AgentMessage(kind="task") is structured conversation content,
     // not a durable gateway task. Only the agent-task stanza codec creates a
     // task record and exposes lifecycle tools, so an arbitrary message id can
@@ -53,7 +53,7 @@ export function nanoclawInboundFromBridge(payload: BridgeInboundPayload): Nanocl
     kind: 'chat',
     content: { text, envelope },
     timestamp: envelope.delivery.receivedAt,
-    isMention: message.isMention,
-    isGroup: message.isGroup,
+    isMention: payload.isMention,
+    isGroup: payload.isGroup,
   };
 }

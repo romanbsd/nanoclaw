@@ -24,12 +24,6 @@ const payload: BridgeInboundPayload = {
   platformId: 'roman@example.com',
   threadId: null,
   agentJid: 'assistant@agents.test',
-  message: {
-    id: 'msg_01',
-    kind: 'chat',
-    content: { text: 'hello via xmpp' },
-    timestamp: '2026-07-03T20:10:00Z',
-  },
   envelope,
 };
 

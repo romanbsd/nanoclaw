@@ -54,8 +54,15 @@ export class XmppSession {
     await this.xmpp.stop();
   }
 
-  async sendChat(to: string, body: string, id?: string): Promise<void> {
-    await this.xmpp.send(xml('message', { type: 'chat', to, id: id || `msg-${Date.now()}` }, xml('body', {}, body)));
+  async sendChat(to: string, body: string, id?: string, threadId?: string): Promise<void> {
+    await this.xmpp.send(
+      xml(
+        'message',
+        { type: 'chat', to, id: id || `msg-${Date.now()}` },
+        xml('body', {}, body),
+        ...(threadId ? [xml('thread', {}, threadId)] : []),
+      ),
+    );
   }
 
   async subscribe(to: string): Promise<void> {

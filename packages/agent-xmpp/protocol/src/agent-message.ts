@@ -132,14 +132,8 @@ export interface BridgeInboundPayload {
   /** Full sender JID used for replies and chat states; routing still uses platformId. */
   replyTo?: string;
   threadId: string | null;
-  message: {
-    id: string;
-    kind: 'chat';
-    content: unknown;
-    timestamp: string;
-    isMention?: boolean;
-    isGroup?: boolean;
-  };
+  isMention?: boolean;
+  isGroup?: boolean;
   agentJid: string;
   envelope: InboundMessage;
 }

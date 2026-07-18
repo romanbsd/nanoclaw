@@ -8,7 +8,12 @@ import type {
   NanoclawAgentRecord,
 } from '@agent-xmpp/orchestrator';
 
-import { deleteAgentGroupCascade, provisionAgentGroup, removeAgentGroupFiles } from '../../agent-group-lifecycle.js';
+import {
+  allocateAgentGroupFolder,
+  deleteAgentGroupCascade,
+  provisionAgentGroup,
+  removeAgentGroupFiles,
+} from '../../agent-group-lifecycle.js';
 import { getDb, hasTable } from '../../db/connection.js';
 import {
   createMessagingGroup,
@@ -16,7 +21,6 @@ import {
   deleteMessagingGroup,
   deleteMessagingGroupAgent,
   getAgentGroup,
-  getAgentGroupByFolder,
   getMessagingGroupAgentByPair,
   getMessagingGroupByPlatform,
   getMessagingGroupsByAgentGroup,
@@ -186,10 +190,6 @@ export class NanoclawXmppAgentHost implements XmppAgentHost {
     }
     const jid = getXmppAgentIdentity(group.id)?.jid;
     const messagingGroups = getMessagingGroupsByAgentGroup(group.id);
-    for (const messagingGroup of messagingGroups) {
-      const wiring = getMessagingGroupAgentByPair(messagingGroup.id, group.id);
-      if (wiring) deleteMessagingGroupAgent(wiring.id);
-    }
     if (jid) this.deleteManifest(jid);
     deleteAgentGroupCascade(group.id);
     for (const messagingGroup of messagingGroups) deleteMessagingGroup(messagingGroup.id);
@@ -197,11 +197,7 @@ export class NanoclawXmppAgentHost implements XmppAgentHost {
   }
 
   private resolveFolder(agentId: string): string {
-    const base = normalizeName(agentId) || 'agent';
-    let folder = base;
-    let suffix = 2;
-    while (getAgentGroupByFolder(folder)) folder = `${base}-${suffix++}`;
-    return folder;
+    return allocateAgentGroupFolder(normalizeName(agentId));
   }
 
   private deleteManifest(jid: string): void {

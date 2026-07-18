@@ -84,32 +84,13 @@ describe('channel registry', () => {
   });
 
   it('should register and retrieve channel adapters', async () => {
-    const { registerChannelAdapter, getRegisteredChannelNames, getChannelContainerContributions } =
-      await import('./channel-registry.js');
+    const { registerChannelAdapter, getRegisteredChannelNames } = await import('./channel-registry.js');
 
     registerChannelAdapter('test-channel', {
       factory: () => createMockAdapter('test'),
-      containerConfig: {
-        env: { TEST_KEY: 'value' },
-      },
     });
 
     expect(getRegisteredChannelNames()).toContain('test-channel');
-    expect(getChannelContainerContributions('ag-test')).toContainEqual({
-      env: { TEST_KEY: 'value' },
-    });
-  });
-
-  it('resolves dynamic container contributions for an agent group', async () => {
-    const { registerChannelAdapter, getChannelContainerContributions } = await import('./channel-registry.js');
-    registerChannelAdapter('dynamic-channel', {
-      factory: () => null,
-      containerConfig: ({ agentGroupId }) => ({ env: { TARGET_AGENT: agentGroupId } }),
-    });
-
-    expect(getChannelContainerContributions('ag-42')).toContainEqual({
-      env: { TARGET_AGENT: 'ag-42' },
-    });
   });
 
   it('normalizes platform addresses through the channel registration', async () => {
